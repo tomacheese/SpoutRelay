@@ -28,10 +28,11 @@ jobs:
           submodules: recursive
 
       - name: 🏗 Setup MSYS2 / MinGW64
-        uses: msys2/setup-msys2@ddf331adaebd714795f1042345e6ca57bd66cea8 # v2.27.0
+        uses: msys2/setup-msys2@cafece8e6baf9247cf9b1bf95097b0b983cc558d # v2.31.0
         with:
           msystem: MINGW64
-          update: false
+          update: true
+          cache: true
           install: >-
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-cmake
