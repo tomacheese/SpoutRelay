@@ -1,0 +1,40 @@
+{
+  "app": {
+    "instance_name": "spoutrelay-publisher-01",
+    "log_dir": "./logs",
+    "metrics_path": "./state/metrics.json",
+    "health_path": "./state/health.json"
+  },
+  "spout": {
+    "sender_name": "YourSpoutSenderName",
+    "poll_interval_ms": 50,
+    "frame_timeout_ms": 300,
+    "sender_missing_timeout_ms": 800,
+    "prefer_dx11": true
+  },
+  "encoder": {
+    "codec": "h264_nvenc",
+    "fallback_codec": "libx264",
+    "bitrate_kbps": 4000,
+    "fps": 30,
+    "gop_size": 30,
+    "max_b_frames": 0,
+    "preset": "fast",
+    "tune": "zerolatency",
+    "threads": 0
+  },
+  "rtsp": {
+    "url": "rtsp://192.168.0.100:8554/live",
+    "connect_timeout_ms": 5000,
+    "send_timeout_ms": 5000,
+    "max_reconnect_attempts": 5,
+    "reconnect_delay_ms": 1000,
+    "reconnect_max_delay_ms": 30000,
+    "reconnect_backoff_multiplier": 2.0
+  },
+  "runtime": {
+    "shutdown_grace_ms": 3000,
+    "emit_metrics_interval_ms": 1000,
+    "emit_health_interval_ms": 1000
+  }
+}

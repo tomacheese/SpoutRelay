@@ -1,0 +1,113 @@
+#include "config/config_loader.hpp"
+#include <fstream>
+#include <sstream>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+
+static void parse_encoder(const json& j, EncoderConfig& cfg) {
+    if (j.contains("codec"))           cfg.codec           = j["codec"].get<std::string>();
+    if (j.contains("fallback_codec"))  cfg.fallback_codec  = j["fallback_codec"].get<std::string>();
+    if (j.contains("bitrate_kbps"))    cfg.bitrate_kbps    = j["bitrate_kbps"].get<int>();
+    if (j.contains("fps"))             cfg.fps             = j["fps"].get<int>();
+    if (j.contains("gop_size"))        cfg.gop_size        = j["gop_size"].get<int>();
+    if (j.contains("max_b_frames"))    cfg.max_b_frames    = j["max_b_frames"].get<int>();
+    if (j.contains("preset"))          cfg.preset          = j["preset"].get<std::string>();
+    if (j.contains("tune"))            cfg.tune            = j["tune"].get<std::string>();
+    if (j.contains("threads"))         cfg.threads         = j["threads"].get<int>();
+}
+
+static void parse_rtsp(const json& j, RtspConfig& cfg) {
+    if (j.contains("url"))                        cfg.url                        = j["url"].get<std::string>();
+    if (j.contains("connect_timeout_ms"))         cfg.connect_timeout_ms         = j["connect_timeout_ms"].get<int>();
+    if (j.contains("send_timeout_ms"))            cfg.send_timeout_ms            = j["send_timeout_ms"].get<int>();
+    if (j.contains("max_reconnect_attempts"))     cfg.max_reconnect_attempts     = j["max_reconnect_attempts"].get<int>();
+    if (j.contains("reconnect_delay_ms"))         cfg.reconnect_delay_ms         = j["reconnect_delay_ms"].get<int>();
+    if (j.contains("reconnect_max_delay_ms"))     cfg.reconnect_max_delay_ms     = j["reconnect_max_delay_ms"].get<int>();
+    if (j.contains("reconnect_backoff_multiplier"))
+        cfg.reconnect_backoff_multiplier = j["reconnect_backoff_multiplier"].get<float>();
+}
+
+bool ConfigLoader::load(const std::string& path, AppConfig& out, std::string& error) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        error = "Cannot open config file: " + path;
+        return false;
+    }
+
+    json j;
+    try {
+        file >> j;
+    } catch (const json::parse_error& e) {
+        error = std::string("JSON parse error: ") + e.what();
+        return false;
+    }
+
+    try {
+        // app section
+        if (j.contains("app")) {
+            const auto& a = j["app"];
+            if (a.contains("instance_name")) out.app.instance_name = a["instance_name"].get<std::string>();
+            if (a.contains("log_dir"))        out.app.log_dir        = a["log_dir"].get<std::string>();
+            if (a.contains("metrics_path"))   out.app.metrics_path   = a["metrics_path"].get<std::string>();
+            if (a.contains("health_path"))    out.app.health_path    = a["health_path"].get<std::string>();
+        }
+
+        // spout section
+        if (j.contains("spout")) {
+            const auto& s = j["spout"];
+            if (s.contains("sender_name"))             out.spout.sender_name             = s["sender_name"].get<std::string>();
+            if (s.contains("poll_interval_ms"))        out.spout.poll_interval_ms        = s["poll_interval_ms"].get<int>();
+            if (s.contains("frame_timeout_ms"))        out.spout.frame_timeout_ms        = s["frame_timeout_ms"].get<int>();
+            if (s.contains("sender_missing_timeout_ms"))
+                out.spout.sender_missing_timeout_ms = s["sender_missing_timeout_ms"].get<int>();
+            if (s.contains("prefer_dx11"))             out.spout.prefer_dx11             = s["prefer_dx11"].get<bool>();
+        }
+
+        // encoder section
+        if (j.contains("encoder")) parse_encoder(j["encoder"], out.encoder);
+
+        // rtsp section
+        if (j.contains("rtsp")) parse_rtsp(j["rtsp"], out.rtsp);
+
+        // runtime section
+        if (j.contains("runtime")) {
+            const auto& r = j["runtime"];
+            if (r.contains("shutdown_grace_ms"))        out.runtime.shutdown_grace_ms        = r["shutdown_grace_ms"].get<int>();
+            if (r.contains("emit_metrics_interval_ms")) out.runtime.emit_metrics_interval_ms = r["emit_metrics_interval_ms"].get<int>();
+            if (r.contains("emit_health_interval_ms"))  out.runtime.emit_health_interval_ms  = r["emit_health_interval_ms"].get<int>();
+        }
+
+    } catch (const json::exception& e) {
+        error = std::string("Config read error: ") + e.what();
+        return false;
+    }
+
+    // Validation
+    if (out.spout.sender_name.empty()) {
+        error = "spout.sender_name must not be empty";
+        return false;
+    }
+    if (out.rtsp.url.empty() || out.rtsp.url.rfind("rtsp://", 0) != 0) {
+        error = "rtsp.url must start with rtsp://";
+        return false;
+    }
+    if (out.encoder.fps <= 0 || out.encoder.fps > 240) {
+        error = "encoder.fps must be between 1 and 240";
+        return false;
+    }
+    if (out.encoder.bitrate_kbps <= 0) {
+        error = "encoder.bitrate_kbps must be positive";
+        return false;
+    }
+    if (out.spout.poll_interval_ms <= 0) {
+        error = "spout.poll_interval_ms must be positive";
+        return false;
+    }
+    if (out.spout.frame_timeout_ms <= 0) {
+        error = "spout.frame_timeout_ms must be positive";
+        return false;
+    }
+
+    return true;
+}

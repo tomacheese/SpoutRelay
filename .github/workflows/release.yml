@@ -1,0 +1,163 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 🚀 Version & Release
+    runs-on: windows-latest
+    if: github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: 🛎 Checkout (full history)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷 Determine next version
+        id: version
+        shell: bash
+        run: |
+          # Get latest semver tag; default to v0.0.0
+          LATEST=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          LATEST=${LATEST:-v0.0.0}
+          echo "Latest tag: $LATEST"
+
+          MAJOR=$(echo "$LATEST" | cut -d. -f1 | tr -d v)
+          MINOR=$(echo "$LATEST" | cut -d. -f2)
+          PATCH=$(echo "$LATEST" | cut -d. -f3)
+
+          # Collect commits since last tag
+          if [ "$LATEST" = "v0.0.0" ]; then
+            COMMITS=$(git log --pretty=format:"%s" HEAD)
+          else
+            COMMITS=$(git log --pretty=format:"%s" "${LATEST}..HEAD")
+          fi
+
+          echo "Commits since $LATEST:"
+          echo "$COMMITS"
+
+          if [ -z "$COMMITS" ]; then
+            echo "No new commits since last release. Skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BUMP=patch
+          while IFS= read -r msg; do
+            if echo "$msg" | grep -qE '!:|BREAKING CHANGE'; then
+              BUMP=major; break
+            elif echo "$msg" | grep -qE '^feat(\(.*\))?:'; then
+              BUMP=minor
+            fi
+          done <<< "$COMMITS"
+
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "New version: $NEW_TAG (bump: $BUMP)"
+          echo "new_tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          # Build release notes from commits
+          NOTES=""
+          while IFS= read -r msg; do
+            NOTES="${NOTES}- ${msg}"$'\n'
+          done <<< "$COMMITS"
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: 🏗 Setup MSYS2 / MinGW64
+        if: steps.version.outputs.skip == 'false'
+        uses: msys2/setup-msys2@ddf331adaebd714795f1042345e6ca57bd66cea8 # v2.27.0
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-ffmpeg
+
+      - name: 🔧 Configure CMake (Release)
+        if: steps.version.outputs.skip == 'false'
+        shell: msys2 {0}
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=toolchain-mingw.cmake \
+            -DBUILD_TESTS=OFF
+        env:
+          MINGW_BIN: /mingw64/bin
+          MINGW_ROOT: /mingw64/x86_64-w64-mingw32
+
+      - name: 🏗️ Build release binary
+        if: steps.version.outputs.skip == 'false'
+        shell: msys2 {0}
+        run: cmake --build build --parallel
+
+      - name: 📦 Package release archive
+        if: steps.version.outputs.skip == 'false'
+        id: package
+        shell: msys2 {0}
+        run: |
+          VERSION="${{ steps.version.outputs.new_tag }}"
+          ARCHIVE="spout-rtsp-publisher-${VERSION}-win64.zip"
+          mkdir -p dist
+
+          cp build/publisher-agent.exe dist/
+          ldd build/publisher-agent.exe \
+            | grep '/mingw64' \
+            | awk '{print $3}' \
+            | xargs -I{} cp {} dist/
+          [ -f config/config.example.json ] && cp config/config.example.json dist/
+          [ -f README.md ] && cp README.md dist/
+
+          cd dist && 7z a -tzip "../${ARCHIVE}" . && cd ..
+
+          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+          echo "Packaged: ${ARCHIVE}"
+
+      - name: 🏷 Create git tag
+        if: steps.version.outputs.skip == 'false'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.version.outputs.new_tag }}"
+          git push origin "${{ steps.version.outputs.new_tag }}"
+
+      - name: 🎉 Create GitHub Release
+        if: steps.version.outputs.skip == 'false'
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+        with:
+          tag_name: ${{ steps.version.outputs.new_tag }}
+          name: ${{ steps.version.outputs.new_tag }}
+          body: |
+            ## Changes
+
+            ${{ steps.version.outputs.notes }}
+
+            ---
+            *Built with MinGW64 GCC on windows-latest. Requires Windows 10/11 x64.*
+          files: ${{ steps.package.outputs.archive }}
+          draft: false
+          prerelease: false
