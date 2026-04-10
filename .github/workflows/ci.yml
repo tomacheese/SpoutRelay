@@ -39,7 +39,6 @@ jobs:
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-ffmpeg
-            mingw-w64-x86_64-shaderc
 
       - name: 🔧 Configure CMake
         shell: msys2 {0}
@@ -60,21 +59,19 @@ jobs:
         shell: msys2 {0}
         run: ./build/tests/publisher_tests.exe
 
-      - name: 📦 Package binary (static build)
+      - name: 📦 Package binary
         shell: msys2 {0}
         run: |
           mkdir -p dist
           cp build/publisher-agent.exe dist/
           strip dist/publisher-agent.exe
-          # Verify static linking: /mingw64 DLLs should be absent
-          REMAINING=$(ldd build/publisher-agent.exe | grep '/mingw64' || true)
-          if [ -n "$REMAINING" ]; then
-            echo "::warning::Some MinGW64 DLLs still needed (static linking incomplete):"
-            echo "$REMAINING"
-            echo "$REMAINING" | awk '{print $3}' | xargs -I{} cp {} dist/
-          else
-            echo "Static linking OK — no MinGW64 DLLs required"
-          fi
+          # Collect all transitive FFmpeg/codec DLLs from /mingw64/bin
+          # (C++ runtime DLLs are embedded via -static-libgcc/-static-libstdc++)
+          ldd build/publisher-agent.exe \
+            | grep '/mingw64' \
+            | awk '{print $3}' \
+            | xargs -I{} cp {} dist/
+          echo "Packaged $(ls dist/ | wc -l) files"
 
       - name: 📦 Upload artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0

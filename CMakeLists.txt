@@ -18,63 +18,8 @@ set(SPOUT2_DX_DIR "${CMAKE_SOURCE_DIR}/deps/Spout2/SPOUTSDK/SpoutDirectX/SpoutDX
 # ---------------------------------------------------------------------------
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
-    # Detection only (no STATIC — pkg-config --static can fail for some FFmpeg
-    # transitive deps like rav1e that lack proper .pc files on MSYS2)
     pkg_check_modules(FFMPEG QUIET
         libavcodec libavformat libavutil libswscale libswresample)
-
-    if(FFMPEG_FOUND AND MINGW)
-        # For static single-binary builds, expand to full transitive dep list.
-        # Separate -L dirs from -l/-framework/other link flags.
-        execute_process(
-            COMMAND "${PKG_CONFIG_EXECUTABLE}" --static --libs
-                libavcodec libavformat libavutil libswscale libswresample
-            OUTPUT_VARIABLE _ffmpeg_static_raw
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET
-            RESULT_VARIABLE _ffmpeg_static_ok
-        )
-        if(_ffmpeg_static_ok EQUAL 0 AND _ffmpeg_static_raw)
-            separate_arguments(_ffmpeg_static_all UNIX_COMMAND "${_ffmpeg_static_raw}")
-            set(_ffmpeg_static_libs "")
-            set(_ffmpeg_static_dirs "")
-            foreach(_f ${_ffmpeg_static_all})
-                if(_f MATCHES "^-L(.+)$")
-                    list(APPEND _ffmpeg_static_dirs "${CMAKE_MATCH_1}")
-                else()
-                    list(APPEND _ffmpeg_static_libs "${_f}")
-                endif()
-            endforeach()
-            # -ldl is Linux-only (Windows uses LoadLibrary; no libdl exists in MinGW)
-            list(REMOVE_ITEM _ffmpeg_static_libs "-ldl")
-            # shaderc_shared is DLL-only; replace with the static libshaderc.a
-            # (provided by mingw-w64-x86_64-shaderc; installed in ci.yml)
-            list(TRANSFORM _ffmpeg_static_libs REPLACE "^-lshaderc_shared$" "-lshaderc")
-            # soxr.a is compiled with OpenMP but its .pc does not list -lgomp;
-            # libgomp.a is provided by GCC's own package (mingw-w64-x86_64-gcc).
-            if(NOT "-lgomp" IN_LIST _ffmpeg_static_libs)
-                list(APPEND _ffmpeg_static_libs "-lgomp")
-            endif()
-            # libjxl.a uses the Highway SIMD library but pkg-config omits -lhwy
-            if(NOT "-lhwy" IN_LIST _ffmpeg_static_libs)
-                list(APPEND _ffmpeg_static_libs "-lhwy")
-            endif()
-            # rav1e (Rust) calls Windows NT APIs (NtWriteFile, RtlNtStatusToDosError)
-            # that are not in MinGW's default auto-linked libs
-            if(NOT "-lntdll" IN_LIST _ffmpeg_static_libs)
-                list(APPEND _ffmpeg_static_libs "-lntdll")
-            endif()
-
-            set(FFMPEG_LIBRARIES ${_ffmpeg_static_libs})
-            if(_ffmpeg_static_dirs)
-                list(APPEND FFMPEG_LIBRARY_DIRS ${_ffmpeg_static_dirs})
-                list(REMOVE_DUPLICATES FFMPEG_LIBRARY_DIRS)
-            endif()
-            message(STATUS "FFmpeg: resolved (static, dl/shaderc_shared excluded)")
-        else()
-            message(STATUS "pkg-config --static unavailable; using dynamic FFmpeg")
-        endif()
-    endif()
 endif()
 
 if(NOT FFMPEG_FOUND)
@@ -202,17 +147,14 @@ endif()
 add_executable(publisher-agent src/main.cpp)
 target_link_libraries(publisher-agent PRIVATE publisher_lib)
 
-# Static-link the C++ runtime and prefer static archives for all deps.
-# Special exclusions in FFMPEG_LIBRARIES (see above):
-#   -ldl removed (Linux-only), shaderc_shared→shaderc, -lgomp/-lhwy/-lntdll added.
-# rav1e and rsvg-2 both embed the Rust standard library; --allow-multiple-definition
-# prevents a duplicate-symbol link failure.
+# Semi-static: embed C++ runtime and winpthread into the EXE so the
+# redistributable does not require libgcc/libstdc++/libwinpthread DLLs.
+# FFmpeg and codec DLLs are bundled separately in the distribution package.
 if(MINGW)
     target_link_options(publisher-agent PRIVATE
-        -static
         -static-libgcc
         -static-libstdc++
-        -Wl,--allow-multiple-definition
+        -Wl,-Bstatic,-lwinpthread,-Bdynamic
     )
 endif()
 

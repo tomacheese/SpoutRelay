@@ -97,7 +97,6 @@ jobs:
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-ffmpeg
-            mingw-w64-x86_64-shaderc
 
       - name: 🔧 Configure CMake (Release)
         if: steps.version.outputs.skip == 'false'
@@ -128,14 +127,12 @@ jobs:
           cp build/publisher-agent.exe dist/
           strip dist/publisher-agent.exe
 
-          # Verify static linking; copy any remaining MinGW64 DLLs as fallback
-          REMAINING=$(ldd build/publisher-agent.exe | grep '/mingw64' || true)
-          if [ -n "$REMAINING" ]; then
-            echo "::warning::Bundling MinGW64 DLLs (static linking incomplete)"
-            echo "$REMAINING" | awk '{print $3}' | xargs -I{} cp {} dist/
-          else
-            echo "Static linking OK — single-binary distribution"
-          fi
+          # Collect all transitive FFmpeg/codec DLLs from /mingw64/bin
+          # (C++ runtime DLLs are embedded via -static-libgcc/-static-libstdc++)
+          ldd build/publisher-agent.exe \
+            | grep '/mingw64' \
+            | awk '{print $3}' \
+            | xargs -I{} cp {} dist/
 
           [ -f config/config.example.json ] && cp config/config.example.json dist/
           [ -f README.md ] && cp README.md dist/
@@ -143,7 +140,7 @@ jobs:
           cd dist && 7z a -tzip "../${ARCHIVE}" . && cd ..
 
           echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
-          echo "Packaged: ${ARCHIVE}"
+          echo "Packaged $(ls dist/ | wc -l) files into ${ARCHIVE}"
 
       - name: 🏷 Create git tag
         if: steps.version.outputs.skip == 'false'
