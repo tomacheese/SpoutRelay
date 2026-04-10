@@ -50,6 +50,11 @@ if(PkgConfig_FOUND)
             # shaderc_shared has no static archive in MSYS2; link it dynamically
             # (handled separately via publisher-agent's MINGW-specific link options)
             list(REMOVE_ITEM _ffmpeg_static_libs "-lshaderc_shared")
+            # soxr.a is compiled with OpenMP but its .pc does not list -lgomp;
+            # libgomp.a is provided by GCC's own package (mingw-w64-x86_64-gcc).
+            if(NOT "-lgomp" IN_LIST _ffmpeg_static_libs)
+                list(APPEND _ffmpeg_static_libs "-lgomp")
+            endif()
 
             set(FFMPEG_LIBRARIES ${_ffmpeg_static_libs})
             if(_ffmpeg_static_dirs)
