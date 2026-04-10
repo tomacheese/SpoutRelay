@@ -130,7 +130,6 @@ avcodec_find_encoder("h264_nvenc")
 | FFmpeg (avcodec/avformat/swscale) | エンコード・RTSP 配信 | 動的リンク (.dll) |
 | nlohmann/json | 設定ファイルパース | ヘッダーオンリー |
 | spdlog | 構造化ログ | ヘッダーオンリー |
-| GoogleTest | ユニットテスト | 静的リンク（テスト時のみ） |
 
 ## 既知の技術的制約
 

@@ -59,6 +59,7 @@ void MetricsStore::reset_session_counters() {
 }
 
 void MetricsStore::mark_session_start() {
+    std::lock_guard<std::mutex> lk(mutex_);
     session_start_ms_ = time_utils::system_now_ms();
 }
 

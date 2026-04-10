@@ -108,6 +108,34 @@ bool ConfigLoader::load(const std::string& path, AppConfig& out, std::string& er
         error = "spout.frame_timeout_ms must be positive";
         return false;
     }
+    if (out.rtsp.connect_timeout_ms <= 0) {
+        error = "rtsp.connect_timeout_ms must be positive";
+        return false;
+    }
+    if (out.rtsp.send_timeout_ms <= 0) {
+        error = "rtsp.send_timeout_ms must be positive";
+        return false;
+    }
+    if (out.rtsp.max_reconnect_attempts < 0) {
+        error = "rtsp.max_reconnect_attempts must be non-negative";
+        return false;
+    }
+    if (out.rtsp.reconnect_delay_ms <= 0) {
+        error = "rtsp.reconnect_delay_ms must be positive";
+        return false;
+    }
+    if (out.rtsp.reconnect_max_delay_ms <= 0) {
+        error = "rtsp.reconnect_max_delay_ms must be positive";
+        return false;
+    }
+    if (out.rtsp.reconnect_max_delay_ms < out.rtsp.reconnect_delay_ms) {
+        error = "rtsp.reconnect_max_delay_ms must be >= rtsp.reconnect_delay_ms";
+        return false;
+    }
+    if (out.rtsp.reconnect_backoff_multiplier < 1.0f) {
+        error = "rtsp.reconnect_backoff_multiplier must be >= 1.0";
+        return false;
+    }
 
     return true;
 }

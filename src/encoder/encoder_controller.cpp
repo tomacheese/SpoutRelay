@@ -186,7 +186,8 @@ bool EncoderController::encode(const FrameBuffer& frame,
     const uint8_t* in_data[1]  = { frame.data.data() };
     int            in_stride[1] = { static_cast<int>(frame.width) * 4 };
 
-    av_frame_make_writable(impl_->yuv_frame);
+    int make_writable_ret = av_frame_make_writable(impl_->yuv_frame);
+    if (make_writable_ret < 0) return false;
     sws_scale(impl_->sws_ctx,
               in_data, in_stride, 0, static_cast<int>(frame.height),
               impl_->yuv_frame->data, impl_->yuv_frame->linesize);

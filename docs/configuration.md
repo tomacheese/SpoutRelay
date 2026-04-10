@@ -169,6 +169,14 @@ NVENC では `tune` オプションがサポートされていないため自動
 - `rtsp.url` が空でないこと
 - `encoder.bitrate_kbps` > 0
 - `encoder.fps` > 0
+- `spout.poll_interval_ms` > 0
+- `spout.frame_timeout_ms` > 0
+- `rtsp.connect_timeout_ms` > 0
+- `rtsp.send_timeout_ms` > 0
 - `rtsp.max_reconnect_attempts` ≥ 0
+- `rtsp.reconnect_delay_ms` > 0
+- `rtsp.reconnect_max_delay_ms` > 0
+- `rtsp.reconnect_max_delay_ms` ≥ `rtsp.reconnect_delay_ms`
+- `rtsp.reconnect_backoff_multiplier` ≥ 1.0
 
 バリデーションエラーは `CONFIG_VALIDATION_ERROR` コードで標準エラーへ出力されます。

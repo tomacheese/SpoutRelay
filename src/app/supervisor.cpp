@@ -108,15 +108,7 @@ void Supervisor::handle_probing() {
         return;
     }
 
-    bool found = false;
-    if (!config_.spout.sender_name.empty()) {
-        found = spout_monitor_->probe_sender(config_.spout.sender_name);
-    } else {
-        // No specific sender requested – try to use any active sender
-        // Check GetSenderCount via spoutDX internal sendernames
-        // For simplicity, probe a well-known default name or just wait
-        found = false;
-    }
+    bool found = spout_monitor_->probe_sender(config_.spout.sender_name);
 
     if (found) {
         std::string connect_err;

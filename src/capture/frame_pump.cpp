@@ -6,6 +6,7 @@ FramePump::FramePump()  = default;
 FramePump::~FramePump() { stop(); }
 
 void FramePump::start(std::shared_ptr<ISpoutMonitor> monitor, int poll_interval_ms) {
+    if (!monitor) return;
     if (running_.load()) stop();
     monitor_          = std::move(monitor);
     poll_interval_ms_ = poll_interval_ms;
@@ -62,7 +63,7 @@ void FramePump::capture_thread_func() {
             if (static_cast<int>(queue_.size()) >= MAX_QUEUE_SIZE) {
                 queue_.pop(); // drop oldest frame to prevent lag
             }
-            queue_.push({buf, meta});
+            queue_.emplace(std::move(buf), std::move(meta));
             cv_.notify_one();
         }
 

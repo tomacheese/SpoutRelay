@@ -134,7 +134,7 @@ set(CMAKE_CXX_COMPILER "C:/path/to/g++.exe")
 | `spout2_static` | 静的ライブラリ | Spout2 SDK（WIN32_LEAN_AND_MEAN なし） |
 | `publisher_lib` | 静的ライブラリ | アプリロジック全体 |
 | `publisher-agent` | 実行ファイル | メインアプリ |
-| `publisher_tests` | 実行ファイル | GTest ユニットテスト |
+| `publisher_tests` | 実行ファイル | カスタムテストランナーによるユニットテスト |
 | `spout_test_sender` | 実行ファイル | E2E テスト用センダー |
 
 ### spout2_static の分離について

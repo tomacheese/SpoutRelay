@@ -9,9 +9,10 @@ extern "C" {
 #include <cstring>
 
 struct RtspPublisherClient::Impl {
-    AVFormatContext* fmt_ctx     = nullptr;
+    AVFormatContext* fmt_ctx      = nullptr;
     AVStream*        video_stream = nullptr;
-    int              fps         = 30;
+    AVPacket*        pkt          = nullptr;
+    int              fps          = 30;
 };
 
 RtspPublisherClient::RtspPublisherClient()
@@ -91,6 +92,18 @@ bool RtspPublisherClient::connect(const RtspConfig& config,
     impl_->fps          = codec_info.fps;
     connected_          = true;
 
+    // Allocate a reusable AVPacket to avoid per-send-packet heap allocation.
+    impl_->pkt = av_packet_alloc();
+    if (!impl_->pkt) {
+        avio_closep(&impl_->fmt_ctx->pb);
+        avformat_free_context(impl_->fmt_ctx);
+        impl_->fmt_ctx = nullptr;
+        impl_->video_stream = nullptr;
+        connected_ = false;
+        error = "Failed to allocate reusable AVPacket";
+        return false;
+    }
+
     // Apply per-write timeout so av_interleaved_write_frame cannot block forever
     if (impl_->fmt_ctx->pb)
         av_opt_set_int(impl_->fmt_ctx->pb, "rw_timeout",
@@ -101,13 +114,13 @@ bool RtspPublisherClient::connect(const RtspConfig& config,
 }
 
 bool RtspPublisherClient::send_packet(const EncodedPacket& pkt) {
-    if (!connected_ || !impl_->fmt_ctx || !impl_->video_stream) return false;
+    if (!connected_ || !impl_->fmt_ctx || !impl_->video_stream || !impl_->pkt) return false;
 
-    AVPacket* av_pkt = av_packet_alloc();
-    if (!av_pkt) return false;
+    AVPacket* av_pkt = impl_->pkt;
+    av_packet_unref(av_pkt);  // Release previous data buffer (no-op if already clean)
 
     int ret = av_new_packet(av_pkt, static_cast<int>(pkt.data.size()));
-    if (ret < 0) { av_packet_free(&av_pkt); return false; }
+    if (ret < 0) { return false; }
 
     std::memcpy(av_pkt->data, pkt.data.data(), pkt.data.size());
     av_pkt->pts          = pkt.pts;
@@ -122,7 +135,7 @@ bool RtspPublisherClient::send_packet(const EncodedPacket& pkt) {
     av_packet_rescale_ts(av_pkt, enc_tb, impl_->video_stream->time_base);
 
     ret = av_interleaved_write_frame(impl_->fmt_ctx, av_pkt);
-    av_packet_free(&av_pkt);
+    // av_interleaved_write_frame takes ownership and unrefs; packet struct is still reusable
 
     if (ret < 0) {
         connected_ = false;
@@ -146,5 +159,9 @@ void RtspPublisherClient::disconnect() {
     avformat_free_context(impl_->fmt_ctx);
     impl_->fmt_ctx      = nullptr;
     impl_->video_stream = nullptr;
-    connected_          = false;
+
+    av_packet_free(&impl_->pkt);
+    impl_->pkt = nullptr;
+
+    connected_ = false;
 }

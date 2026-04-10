@@ -89,7 +89,7 @@
 ### ファイル名
 
 ```
-logs/<instance_name>_<YYYYMMDD>.jsonl
+logs/<instance_name>.jsonl
 ```
 
 ### イベント種別
@@ -132,11 +132,10 @@ logs/<instance_name>_<YYYYMMDD>.jsonl
 
 ### エラーコード一覧
 
+> **注意**: 設定ファイルエラー（`CONFIG_NOT_FOUND` / `CONFIG_PARSE_ERROR` / `CONFIG_VALIDATION_ERROR`）は起動時に標準エラー出力へのみ出力されます。アプリケーションが起動できなかった場合はイベントログに記録されません。
+
 | コード | 説明 |
 |--------|------|
-| `CONFIG_NOT_FOUND` | 設定ファイルが見つからない |
-| `CONFIG_PARSE_ERROR` | 設定ファイルの JSON パースエラー |
-| `CONFIG_VALIDATION_ERROR` | 設定値のバリデーションエラー |
 | `SPOUT_INIT_FAILED` | SpoutDX の初期化失敗 |
 | `SPOUT_CONNECT_FAILED` | Spout センダーへの接続失敗 |
 | `SPOUT_RECEIVE_FAILED` | フレーム受信タイムアウト |
