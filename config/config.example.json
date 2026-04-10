@@ -14,7 +14,7 @@
   },
   "encoder": {
     "codec": "h264_nvenc",
-    "fallback_codec": "libx264",
+    "fallback_codec": "h264_mf",
     "bitrate_kbps": 4000,
     "fps": 30,
     "gop_size": 30,

@@ -11,3 +11,6 @@ logs/
 # Downloaded binary dependencies (not committed)
 deps/ffmpeg/
 deps/mediamtx/
+
+# Test temp files
+test_*_tmp.json
