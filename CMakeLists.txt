@@ -45,12 +45,18 @@ if(PkgConfig_FOUND)
                     list(APPEND _ffmpeg_static_libs "${_f}")
                 endif()
             endforeach()
+            # -ldl is Linux-only (Windows uses LoadLibrary; no libdl exists in MinGW)
+            list(REMOVE_ITEM _ffmpeg_static_libs "-ldl")
+            # shaderc_shared has no static archive in MSYS2; link it dynamically
+            # (handled separately via publisher-agent's MINGW-specific link options)
+            list(REMOVE_ITEM _ffmpeg_static_libs "-lshaderc_shared")
+
             set(FFMPEG_LIBRARIES ${_ffmpeg_static_libs})
             if(_ffmpeg_static_dirs)
                 list(APPEND FFMPEG_LIBRARY_DIRS ${_ffmpeg_static_dirs})
                 list(REMOVE_DUPLICATES FFMPEG_LIBRARY_DIRS)
             endif()
-            message(STATUS "FFmpeg: resolved ${_ffmpeg_static_libs} (static)")
+            message(STATUS "FFmpeg: resolved (static, dl/shaderc_shared excluded)")
         else()
             message(STATUS "pkg-config --static unavailable; using dynamic FFmpeg")
         endif()
@@ -182,16 +188,21 @@ endif()
 add_executable(publisher-agent src/main.cpp)
 target_link_libraries(publisher-agent PRIVATE publisher_lib)
 
-# Static-link the C++ runtime and prefer static archives for all deps
-# (MinGW: libgcc, libstdc++, libwinpthread, FFmpeg .a files).
-# Windows system DLLs (d3d11, user32, etc.) have no real static impl, so
-# they remain as regular DLL imports — which is correct and always available.
+# Static-link the C++ runtime and prefer static archives for all deps.
+# -dl is excluded from FFMPEG_LIBRARIES (Linux-only).
+# shaderc_shared has no static archive, so it is linked dynamically below.
+# rav1e and rsvg-2 both embed the Rust standard library; --allow-multiple-definition
+# prevents a duplicate-symbol link failure.
 if(MINGW)
     target_link_options(publisher-agent PRIVATE
         -static
         -static-libgcc
         -static-libstdc++
+        -Wl,--allow-multiple-definition
     )
+    # shaderc_shared is Vulkan/SPIR-V; link it as a DLL even in -static mode.
+    # -Bdynamic/-Bstatic wrap overrides the global -static for this lib only.
+    target_link_libraries(publisher-agent PRIVATE "-Wl,-Bdynamic,-lshaderc_shared,-Bstatic")
 endif()
 
 # Test Spout sender (for E2E testing)
