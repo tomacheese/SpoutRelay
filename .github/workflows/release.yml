@@ -25,6 +25,9 @@ jobs:
           fetch-depth: 0
           submodules: recursive
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Always check out the exact commit that passed CI, not HEAD of master.
+          # workflow_run uses default branch by default, so we must pin the SHA explicitly.
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: 🏷 Determine next version
         id: version
@@ -130,25 +133,26 @@ jobs:
       - name: 📦 Package release archive
         if: steps.version.outputs.skip == 'false'
         id: package
-        shell: msys2 {0}
+        shell: pwsh
         run: |
-          VERSION="${{ steps.version.outputs.new_tag }}"
-          ARCHIVE="spout-rtsp-publisher-${VERSION}-win64.zip"
-          mkdir -p dist
+          $VERSION = "${{ steps.version.outputs.new_tag }}"
+          $ARCHIVE = "spout-rtsp-publisher-${VERSION}-win64.zip"
+          New-Item -ItemType Directory -Force dist | Out-Null
 
-          cp build/publisher-agent.exe dist/
-          strip dist/publisher-agent.exe
+          Copy-Item build\publisher-agent.exe dist\
 
-          # Bundle FFmpeg LGPL DLLs (only the 7 core FFmpeg DLLs — no GPL codecs)
-          cp deps/ffmpeg/bin/*.dll dist/
+          # Bundle FFmpeg LGPL DLLs
+          Copy-Item deps\ffmpeg\bin\*.dll dist\
 
-          [ -f config/config.example.json ] && cp config/config.example.json dist/
-          [ -f README.md ] && cp README.md dist/
+          if (Test-Path config\config.example.json) { Copy-Item config\config.example.json dist\ }
+          if (Test-Path README.md) { Copy-Item README.md dist\ }
 
-          cd dist && 7z a -tzip "../${ARCHIVE}" . && cd ..
+          # Create zip using PowerShell (7z is not available on GitHub-hosted runners)
+          Compress-Archive -Path dist\* -DestinationPath $ARCHIVE -Force
 
-          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
-          echo "Packaged $(ls dist/ | wc -l) files into ${ARCHIVE}"
+          "archive=$ARCHIVE" >> $env:GITHUB_OUTPUT
+          $count = (Get-ChildItem dist).Count
+          Write-Host "Packaged $count files into $ARCHIVE"
 
       - name: 🏷 Create git tag
         if: steps.version.outputs.skip == 'false'

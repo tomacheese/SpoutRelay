@@ -202,7 +202,8 @@ bool EncoderController::encode(const FrameBuffer& frame,
 
 bool EncoderController::flush(std::vector<EncodedPacket>& out_packets) {
     if (!impl_->codec_ctx) return true;
-    avcodec_send_frame(impl_->codec_ctx, nullptr);
+    int ret = avcodec_send_frame(impl_->codec_ctx, nullptr);
+    if (ret < 0 && ret != AVERROR_EOF) return false;
     return drain_encoder(impl_->codec_ctx, impl_->pkt, out_packets, config_.fps);
 }
 

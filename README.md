@@ -18,7 +18,7 @@ A Windows application that captures frames from a [Spout2](https://spout.zeal.co
 |-----------|---------|
 | Windows | 10 / 11 (x64) |
 | NVIDIA GPU (optional) | any NVENC-capable card |
-| [FFmpeg shared libs](https://github.com/BtbN/FFmpeg-Builds/releases) | win64-lgpl-shared, avcodec ≥ 61 |
+| [FFmpeg shared libs](https://github.com/BtbN/FFmpeg-Builds/releases) | win64-lgpl-shared, avcodec ≥ 62 |
 | [Spout2 SDK](https://github.com/leadedge/Spout2) | included in `deps/` |
 | [MediaMTX](https://github.com/bluenviron/mediamtx) | v1.x (receiver side) |
 | GCC (MinGW-w64) | ≥ 13 recommended |
@@ -91,7 +91,7 @@ publisher/
 │   ├── rtsp/         # FFmpeg RTSP ANNOUNCE/RECORD client
 │   └── spout/        # SpoutDX receiver (SpoutMonitor)
 ├── tests/
-│   ├── unit/         # Custom-runner unit tests (22 tests)
+│   ├── unit/         # Custom-runner unit tests (31 tests)
 │   └── spout_test_sender/  # Color-cycling DX11 Spout sender for E2E testing
 ├── config/
 │   ├── config.example.json

@@ -68,20 +68,21 @@ for ($i = 0; $i -lt 10; $i++) {
 # NVENC が利用可能か確認
 ffmpeg -encoders 2>$null | Select-String "nvenc"
 
-# libx264 が利用可能か確認
-ffmpeg -encoders 2>$null | Select-String "libx264"
+# h264_mf（Windows Media Foundation）が利用可能か確認
+ffmpeg -encoders 2>$null | Select-String "h264_mf"
 ```
 
 NVENC が表示されない場合:
 - NVIDIA GPU が搭載されていない、またはドライバーが古い
 - FFmpeg が NVENC サポート付きでビルドされていない
 
-libx264 が表示されない場合:
-- BtbN の `gpl-shared` ビルドには libx264 が含まれています。別ビルドを使用している可能性があります。
+h264_mf が表示されない場合:
+- Windows Media Foundation が利用不可の環境（Server Core など）
+- `codec` および `fallback_codec` の両方を使用環境に合わせて設定してください
 
 ### `avcodec_open2 failed: Option rc not found` (NVENC)
 
-古い FFmpeg バージョンでの可能性があります。avcodec ≥ 61 の FFmpeg を使用してください。
+古い FFmpeg バージョンでの可能性があります。avcodec ≥ 62 の FFmpeg を使用してください。
 
 ### 色味がおかしい（赤と青が逆）
 

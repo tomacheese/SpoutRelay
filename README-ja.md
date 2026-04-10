@@ -18,7 +18,7 @@
 |--------------|----------|
 | Windows | 10 / 11 (x64) |
 | NVIDIA GPU（任意） | NVENC 対応カード |
-| [FFmpeg 共有ライブラリ](https://github.com/BtbN/FFmpeg-Builds/releases) | win64-lgpl-shared, avcodec ≥ 61 |
+| [FFmpeg 共有ライブラリ](https://github.com/BtbN/FFmpeg-Builds/releases) | win64-lgpl-shared, avcodec ≥ 62 |
 | [Spout2 SDK](https://github.com/leadedge/Spout2) | `deps/` に同梱 |
 | [MediaMTX](https://github.com/bluenviron/mediamtx) | v1.x（受信側） |
 | GCC (MinGW-w64) | ≥ 13 推奨 |
@@ -91,7 +91,7 @@ publisher/
 │   ├── rtsp/         # FFmpeg RTSP ANNOUNCE/RECORD クライアント
 │   └── spout/        # SpoutDX レシーバー（SpoutMonitor）
 ├── tests/
-│   ├── unit/         # カスタムテストランナーによるユニットテスト（22 テスト）
+│   ├── unit/         # カスタムテストランナーによるユニットテスト（31 テスト）
 │   └── spout_test_sender/  # E2E テスト用カラーサイクル DX11 Spout センダー
 ├── config/
 │   ├── config.example.json

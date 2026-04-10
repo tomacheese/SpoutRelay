@@ -114,9 +114,10 @@ publisher/build/
 期待される出力:
 
 ```
-[==========] 22 tests from 4 test suites ran.
-[  PASSED  ] 22 tests.
+All tests passed.
 ```
+
+（31 tests: PASSED: 31, FAILED: 0）
 
 ## ツールチェーンのカスタマイズ
 

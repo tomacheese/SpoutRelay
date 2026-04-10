@@ -153,7 +153,8 @@ void RtspPublisherClient::disconnect() {
     }
     // Close the underlying AVIOContext before freeing the format context to
     // avoid socket/handle leaks and interference with subsequent reconnects.
-    if (impl_->fmt_ctx->pb && !(impl_->fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
+    if (impl_->fmt_ctx->pb && impl_->fmt_ctx->oformat &&
+        !(impl_->fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
         avio_closep(&impl_->fmt_ctx->pb);
     }
     avformat_free_context(impl_->fmt_ctx);

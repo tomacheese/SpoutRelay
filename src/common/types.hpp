@@ -64,7 +64,7 @@ struct SenderInfo {
 
 struct EncoderConfig {
     std::string codec          = "h264_nvenc";
-    std::string fallback_codec = "libx264";
+    std::string fallback_codec = "h264_mf";
     int bitrate_kbps           = 4000;
     int fps                    = 30;
     int gop_size               = 30;
