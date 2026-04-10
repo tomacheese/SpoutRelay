@@ -99,13 +99,16 @@ jobs:
 
       - name: 📥 Download FFmpeg LGPL shared build
         if: steps.version.outputs.skip == 'false'
-        shell: msys2 {0}
+        shell: pwsh
         run: |
-          curl -fsSL -o /tmp/ffmpeg-lgpl.zip \
-            "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-lgpl-shared.zip"
-          unzip -q /tmp/ffmpeg-lgpl.zip -d /tmp/ffmpeg-lgpl
-          inner=$(ls /tmp/ffmpeg-lgpl/ | head -1)
-          cp -r "/tmp/ffmpeg-lgpl/${inner}/." deps/ffmpeg/
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-lgpl-shared.zip"
+          $zip = "$env:TEMP\ffmpeg-lgpl.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+          Expand-Archive -Path $zip -DestinationPath "$env:TEMP\ffmpeg-lgpl" -Force
+          $inner = (Get-ChildItem "$env:TEMP\ffmpeg-lgpl" | Select-Object -First 1).FullName
+          New-Item -ItemType Directory -Force deps\ffmpeg | Out-Null
+          Copy-Item "$inner\*" deps\ffmpeg -Recurse -Force
+          Write-Host "FFmpeg LGPL: $((& deps\ffmpeg\bin\ffmpeg.exe -version 2>&1)[0])"
 
       - name: 🔧 Configure CMake (Release)
         if: steps.version.outputs.skip == 'false'
