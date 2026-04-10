@@ -59,15 +59,21 @@ jobs:
         shell: msys2 {0}
         run: ./build/tests/publisher_tests.exe
 
-      - name: 📦 Collect runtime DLLs
+      - name: 📦 Package binary (static build)
         shell: msys2 {0}
         run: |
           mkdir -p dist
           cp build/publisher-agent.exe dist/
-          ldd build/publisher-agent.exe \
-            | grep '/mingw64' \
-            | awk '{print $3}' \
-            | xargs -I{} cp {} dist/
+          strip dist/publisher-agent.exe
+          # Verify static linking: /mingw64 DLLs should be absent
+          REMAINING=$(ldd build/publisher-agent.exe | grep '/mingw64' || true)
+          if [ -n "$REMAINING" ]; then
+            echo "::warning::Some MinGW64 DLLs still needed (static linking incomplete):"
+            echo "$REMAINING"
+            echo "$REMAINING" | awk '{print $3}' | xargs -I{} cp {} dist/
+          else
+            echo "Static linking OK — no MinGW64 DLLs required"
+          fi
 
       - name: 📦 Upload artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0

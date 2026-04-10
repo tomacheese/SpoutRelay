@@ -18,7 +18,7 @@ set(SPOUT2_DX_DIR "${CMAKE_SOURCE_DIR}/deps/Spout2/SPOUTSDK/SpoutDirectX/SpoutDX
 # ---------------------------------------------------------------------------
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
-    pkg_check_modules(FFMPEG QUIET
+    pkg_check_modules(FFMPEG QUIET STATIC
         libavcodec libavformat libavutil libswscale libswresample)
 endif()
 
@@ -146,6 +146,19 @@ endif()
 
 add_executable(publisher-agent src/main.cpp)
 target_link_libraries(publisher-agent PRIVATE publisher_lib)
+
+# Static-link the C++ runtime and prefer static archives for all deps
+# (MinGW: libgcc, libstdc++, libwinpthread, FFmpeg .a files).
+# Windows system DLLs (d3d11, user32, etc.) have no real static impl, so
+# they remain as regular DLL imports — which is correct and always available.
+if(MINGW)
+    target_link_options(publisher-agent PRIVATE
+        -static
+        -static-libgcc
+        -static-libstdc++
+        -static-libwinpthread
+    )
+endif()
 
 # Test Spout sender (for E2E testing)
 add_executable(spout_test_sender tests/spout_test_sender/main.cpp)

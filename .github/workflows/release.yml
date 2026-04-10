@@ -125,10 +125,17 @@ jobs:
           mkdir -p dist
 
           cp build/publisher-agent.exe dist/
-          ldd build/publisher-agent.exe \
-            | grep '/mingw64' \
-            | awk '{print $3}' \
-            | xargs -I{} cp {} dist/
+          strip dist/publisher-agent.exe
+
+          # Verify static linking; copy any remaining MinGW64 DLLs as fallback
+          REMAINING=$(ldd build/publisher-agent.exe | grep '/mingw64' || true)
+          if [ -n "$REMAINING" ]; then
+            echo "::warning::Bundling MinGW64 DLLs (static linking incomplete)"
+            echo "$REMAINING" | awk '{print $3}' | xargs -I{} cp {} dist/
+          else
+            echo "Static linking OK — single-binary distribution"
+          fi
+
           [ -f config/config.example.json ] && cp config/config.example.json dist/
           [ -f README.md ] && cp README.md dist/
 
