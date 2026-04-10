@@ -191,7 +191,6 @@ if(MINGW)
         -static
         -static-libgcc
         -static-libstdc++
-        -static-libwinpthread
     )
 endif()
 
