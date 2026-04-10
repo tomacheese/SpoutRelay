@@ -18,8 +18,43 @@ set(SPOUT2_DX_DIR "${CMAKE_SOURCE_DIR}/deps/Spout2/SPOUTSDK/SpoutDirectX/SpoutDX
 # ---------------------------------------------------------------------------
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
-    pkg_check_modules(FFMPEG QUIET STATIC
+    # Detection only (no STATIC — pkg-config --static can fail for some FFmpeg
+    # transitive deps like rav1e that lack proper .pc files on MSYS2)
+    pkg_check_modules(FFMPEG QUIET
         libavcodec libavformat libavutil libswscale libswresample)
+
+    if(FFMPEG_FOUND AND MINGW)
+        # For static single-binary builds, expand to full transitive dep list.
+        # Separate -L dirs from -l/-framework/other link flags.
+        execute_process(
+            COMMAND "${PKG_CONFIG_EXECUTABLE}" --static --libs
+                libavcodec libavformat libavutil libswscale libswresample
+            OUTPUT_VARIABLE _ffmpeg_static_raw
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE _ffmpeg_static_ok
+        )
+        if(_ffmpeg_static_ok EQUAL 0 AND _ffmpeg_static_raw)
+            separate_arguments(_ffmpeg_static_all UNIX_COMMAND "${_ffmpeg_static_raw}")
+            set(_ffmpeg_static_libs "")
+            set(_ffmpeg_static_dirs "")
+            foreach(_f ${_ffmpeg_static_all})
+                if(_f MATCHES "^-L(.+)$")
+                    list(APPEND _ffmpeg_static_dirs "${CMAKE_MATCH_1}")
+                else()
+                    list(APPEND _ffmpeg_static_libs "${_f}")
+                endif()
+            endforeach()
+            set(FFMPEG_LIBRARIES ${_ffmpeg_static_libs})
+            if(_ffmpeg_static_dirs)
+                list(APPEND FFMPEG_LIBRARY_DIRS ${_ffmpeg_static_dirs})
+                list(REMOVE_DUPLICATES FFMPEG_LIBRARY_DIRS)
+            endif()
+            message(STATUS "FFmpeg: resolved ${_ffmpeg_static_libs} (static)")
+        else()
+            message(STATUS "pkg-config --static unavailable; using dynamic FFmpeg")
+        endif()
+    endif()
 endif()
 
 if(NOT FFMPEG_FOUND)
