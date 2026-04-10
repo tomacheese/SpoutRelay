@@ -112,6 +112,10 @@ static bool write_atomic(const std::string& path, const std::string& content) {
         if (!f.is_open()) return false;
         f << content;
         f.close();
+        // std::filesystem::rename does not atomically replace existing files on
+        // Windows. Remove the destination first to avoid failures on second write.
+        if (fs::exists(path))
+            fs::remove(path);
         fs::rename(tmp, path);
         return true;
     } catch (...) {

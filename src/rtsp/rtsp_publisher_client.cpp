@@ -55,13 +55,16 @@ bool RtspPublisherClient::connect(const RtspConfig& config,
     if (!codec_info.extradata.empty()) {
         st->codecpar->extradata = static_cast<uint8_t*>(
             av_mallocz(codec_info.extradata.size() + AV_INPUT_BUFFER_PADDING_SIZE));
-        if (st->codecpar->extradata) {
-            std::memcpy(st->codecpar->extradata,
-                        codec_info.extradata.data(),
-                        codec_info.extradata.size());
-            st->codecpar->extradata_size =
-                static_cast<int>(codec_info.extradata.size());
+        if (!st->codecpar->extradata) {
+            avformat_free_context(fmt_ctx);
+            error = "Failed to allocate codec extradata buffer";
+            return false;
         }
+        std::memcpy(st->codecpar->extradata,
+                    codec_info.extradata.data(),
+                    codec_info.extradata.size());
+        st->codecpar->extradata_size =
+            static_cast<int>(codec_info.extradata.size());
     }
 
     AVDictionary* opts = nullptr;
@@ -134,6 +137,11 @@ void RtspPublisherClient::disconnect() {
 
     if (connected_) {
         av_write_trailer(impl_->fmt_ctx);
+    }
+    // Close the underlying AVIOContext before freeing the format context to
+    // avoid socket/handle leaks and interference with subsequent reconnects.
+    if (impl_->fmt_ctx->pb && !(impl_->fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
+        avio_closep(&impl_->fmt_ctx->pb);
     }
     avformat_free_context(impl_->fmt_ctx);
     impl_->fmt_ctx      = nullptr;

@@ -114,16 +114,17 @@ publisher/
 
 ## Running Tests
 
+The test suite uses a custom test runner (no external test framework required).
+
 ```bash
 build/tests/publisher_tests.exe
-# Expected: [==========] 22 tests from 4 test suites. PASSED.
+# Expected output ends with: All N tests passed.
 ```
 
 ## License
 
 This project uses:
 - [Spout2](https://github.com/leadedge/Spout2) — BSD-2-Clause
-- [FFmpeg](https://ffmpeg.org/) — LGPL / GPL (depending on build)
+- [FFmpeg](https://ffmpeg.org/) — LGPL-2.1+
 - [nlohmann/json](https://github.com/nlohmann/json) — MIT
 - [spdlog](https://github.com/gabime/spdlog) — MIT
-- [GoogleTest](https://github.com/google/googletest) — BSD-3-Clause

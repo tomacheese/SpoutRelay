@@ -10,7 +10,7 @@
 .\publisher-agent.exe --config C:\path\to\config\config.json
 ```
 
-### `[ERROR] CONFIG_VALIDATION_ERROR`
+### 設定のバリデーションエラー（例: `spout.sender_name must not be empty`）
 
 設定値が不正です。以下を確認してください:
 

@@ -22,7 +22,7 @@ scoop install cmake ninja
 
 #### FFmpeg 開発ライブラリ
 
-[BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases) から `ffmpeg-master-latest-win64-gpl-shared.zip` をダウンロードし、展開して `deps/ffmpeg/` に配置します。
+[BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases) から `ffmpeg-master-latest-win64-lgpl-shared.zip` をダウンロードし、展開して `deps/ffmpeg/` に配置します。
 
 ```
 deps/ffmpeg/
@@ -43,31 +43,9 @@ deps/Spout2/
         └── SpoutDX/      # SpoutDX.h / SpoutDX.cpp
 ```
 
-#### nlohmann/json
+#### nlohmann/json / spdlog（自動取得）
 
-```
-deps/nlohmann/json.hpp
-```
-
-[リリースページ](https://github.com/nlohmann/json/releases) から `json.hpp` をダウンロード。
-
-#### spdlog
-
-```
-deps/spdlog/include/spdlog/   (ヘッダー群)
-```
-
-[リリースページ](https://github.com/gabime/spdlog/releases) からソースを展開し `include/` 以下をコピー。
-
-#### GoogleTest（テストビルド時のみ）
-
-```
-deps/googletest/
-├── googletest/
-└── CMakeLists.txt
-```
-
-[GoogleTest GitHub](https://github.com/google/googletest) のソース。
+CMake の `FetchContent` により configure 時に自動でダウンロードされます。手動配置は不要です。
 
 ## ビルド手順
 
@@ -78,7 +56,7 @@ cd publisher
 cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=toolchain-mingw.cmake
 ```
 
-`toolchain-mingw.cmake` は Scoop の GCC パスを参照しています。別の場所にインストールした場合は編集してください。
+`toolchain-mingw.cmake` は MSYS2/MinGW64 の標準インストールパスをデフォルトとしています。別の場所にインストールした場合は `MINGW_BIN` / `MINGW_ROOT` 環境変数で上書きできます。
 
 ### 2. ビルド（全ターゲット）
 

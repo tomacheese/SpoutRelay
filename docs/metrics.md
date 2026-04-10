@@ -10,13 +10,8 @@
 
 ```json
 {
-  "status": "ok",
+  "healthy": true,
   "state": "STREAMING",
-  "instance": "spoutrelay-publisher-01",
-  "uptime_sec": 42,
-  "sender": "VRCSender1",
-  "rtsp_url": "rtsp://192.168.0.100:8554/live",
-  "encoder_codec": "h264_nvenc",
   "ts": "2026-04-09T22:10:00.000Z"
 }
 ```
@@ -25,23 +20,16 @@
 
 | フィールド | 型 | 説明 |
 |----------|----|------|
-| `status` | string | `"ok"` / `"degraded"` / `"error"` |
+| `healthy` | bool | `true`: 正常状態（IDLE/PROBING/CONNECTING_OUTPUT/STREAMING）、`false`: それ以外 |
 | `state` | string | 現在のステートマシン状態名 |
-| `instance` | string | 設定の `app.instance_name` |
-| `uptime_sec` | int | セッション開始からの経過秒数 |
-| `sender` | string | 接続中の Spout センダー名 |
-| `rtsp_url` | string | 設定された RTSP URL |
-| `encoder_codec` | string | 使用中のエンコーダーコーデック名 |
 | `ts` | string | ISO 8601 タイムスタンプ（UTC） |
 
-### `status` の判定ロジック
+### `healthy` の判定ロジック
 
-| 状態 | status |
-|------|--------|
-| `STREAMING` | `ok` |
-| `STALLED`, `RECONNECTING_OUTPUT`, `RECONFIGURING` | `degraded` |
-| `FATAL` | `error` |
-| その他 | `ok` |
+| 状態 | healthy |
+|------|---------|
+| `IDLE`, `PROBING`, `CONNECTING_OUTPUT`, `STREAMING` | `true` |
+| `STALLED`, `RECONNECTING_OUTPUT`, `RECONFIGURING`, `FATAL`, その他 | `false` |
 
 ---
 
@@ -53,59 +41,44 @@
 
 ```json
 {
-  "instance": "spoutrelay-publisher-01",
   "state": "STREAMING",
-  "sender": {
-    "name": "VRCSender1",
-    "width": 3840,
-    "height": 2160,
-    "fps": 30.0
-  },
-  "encoder": {
-    "codec": "h264_nvenc",
-    "bitrate_kbps": 1984.5,
-    "current_fps": 29.97
-  },
-  "counters": {
-    "frames_received": 1234,
-    "frames_encoded": 1230,
-    "frames_dropped": 4,
-    "rtsp_errors": 0,
-    "reconnect_attempts": 0
-  },
+  "sender_name": "VRCSender1",
+  "sender_width": 3840,
+  "sender_height": 2160,
+  "sender_fps": 30.0,
+  "bitrate_kbps": 1984.5,
+  "current_fps": 29.97,
   "rtsp_url": "rtsp://192.168.0.100:8554/live",
-  "uptime_sec": 42,
+  "encoder_codec": "h264_nvenc",
+  "uptime_ms": 42000,
+  "frames_received": 1234,
+  "frames_encoded": 1230,
+  "frames_dropped": 4,
+  "rtsp_errors": 0,
+  "reconnect_attempts": 0,
   "ts": "2026-04-09T22:10:00.000Z"
 }
 ```
 
 ### フィールド説明
 
-#### `sender`
-
-| フィールド | 説明 |
-|----------|------|
-| `name` | Spout センダー名 |
-| `width` / `height` | フレーム解像度（ピクセル） |
-| `fps` | センダー側のフレームレート |
-
-#### `encoder`
-
-| フィールド | 説明 |
-|----------|------|
-| `codec` | 使用中のコーデック（`h264_nvenc` 等） |
-| `bitrate_kbps` | 計測ビットレート（kbps） |
-| `current_fps` | エンコーダーの実効フレームレート |
-
-#### `counters`
-
-| フィールド | 説明 |
-|----------|------|
-| `frames_received` | Spout から受信したフレーム総数 |
-| `frames_encoded` | エンコード完了フレーム総数 |
-| `frames_dropped` | キューが満杯でドロップしたフレーム数 |
-| `rtsp_errors` | RTSP 送信エラーの累計数 |
-| `reconnect_attempts` | RTSP 再接続試行の累計数 |
+| フィールド | 型 | 説明 |
+|----------|----|------|
+| `state` | string | 現在のステートマシン状態名 |
+| `sender_name` | string | Spout センダー名 |
+| `sender_width` / `sender_height` | int | フレーム解像度（ピクセル） |
+| `sender_fps` | float | センダー側のフレームレート |
+| `bitrate_kbps` | float | 計測ビットレート（kbps） |
+| `current_fps` | float | エンコーダーの実効フレームレート |
+| `rtsp_url` | string | 設定された RTSP URL |
+| `encoder_codec` | string | 使用中のコーデック（`h264_nvenc` 等） |
+| `uptime_ms` | int | セッション開始からの経過ミリ秒数 |
+| `frames_received` | int | Spout から受信したフレーム総数 |
+| `frames_encoded` | int | エンコード完了フレーム総数 |
+| `frames_dropped` | int | エンコード失敗でドロップしたフレーム数 |
+| `rtsp_errors` | int | RTSP 送信エラーの累計数 |
+| `reconnect_attempts` | int | RTSP 再接続試行の累計数 |
+| `ts` | string | ISO 8601 タイムスタンプ（UTC） |
 
 ---
 
@@ -182,7 +155,7 @@ logs/<instance_name>_<YYYYMMDD>.jsonl
 
 ```powershell
 $health = Get-Content state\health.json | ConvertFrom-Json
-if ($health.status -ne "ok") {
+if (-not $health.healthy) {
     Write-Error "Publisher is not healthy: $($health.state)"
 }
 ```
@@ -191,6 +164,6 @@ if ($health.status -ne "ok") {
 
 ```powershell
 $m = Get-Content state\metrics.json | ConvertFrom-Json
-$dropRate = $m.counters.frames_dropped / $m.counters.frames_received * 100
+$dropRate = $m.frames_dropped / $m.frames_received * 100
 Write-Host "Drop rate: $([math]::Round($dropRate, 2))%"
 ```

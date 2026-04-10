@@ -81,21 +81,24 @@
 | PROBING | STOPPING | シャットダウン要求 |
 | CONNECTING_OUTPUT | STREAMING | 全接続成功 |
 | CONNECTING_OUTPUT | PROBING | フレームタイムアウト / エンコーダー失敗 |
-| CONNECTING_OUTPUT | FATAL | 最大試行回数超過 |
 | CONNECTING_OUTPUT | STOPPING | シャットダウン要求 |
 | STREAMING | STALLED | フレームタイムアウト |
 | STREAMING | RECONFIGURING | 解像度変更検出 |
 | STREAMING | RECONNECTING_OUTPUT | RTSP 送信エラー |
 | STREAMING | STOPPING | シャットダウン要求 |
+| STREAMING | IDLE | センダー消失（長時間 STALLED） |
+| STREAMING | PROBING | エンコードエラー |
 | STALLED | STREAMING | フレーム再開 |
+| STALLED | RECONNECTING_OUTPUT | RTSP エラー検出 |
 | STALLED | PROBING | センダー消失確認 |
+| STALLED | IDLE | センダー消失（長時間 STALLED） |
 | STALLED | STOPPING | シャットダウン要求 |
-| RECONFIGURING | CONNECTING_OUTPUT | 再設定開始 |
+| RECONFIGURING | STREAMING | 再設定成功 |
 | RECONFIGURING | STOPPING | シャットダウン要求 |
-| RECONNECTING_OUTPUT | CONNECTING_OUTPUT | バックオフ待機後 |
+| RECONNECTING_OUTPUT | STREAMING | 再接続成功 |
 | RECONNECTING_OUTPUT | FATAL | 最大再接続回数超過 |
 | RECONNECTING_OUTPUT | STOPPING | シャットダウン要求 |
-| STOPPING | FATAL | 停止完了（アプリ終了） |
+| STOPPING | IDLE | 停止完了（待機状態へ戻る） |
 
 ## イベントログの状態変化エントリ
 

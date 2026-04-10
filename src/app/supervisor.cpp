@@ -7,6 +7,7 @@
 Supervisor::Supervisor() = default;
 Supervisor::~Supervisor() {
     request_stop();
+    if (encode_thread_.joinable()) encode_thread_.join();
     if (metrics_thread_.joinable()) metrics_thread_.join();
 }
 
@@ -62,7 +63,12 @@ void Supervisor::run() {
             case PublisherState::FATAL:
                 log_->log_event(spdlog::level::critical, "fatal_exit", {});
                 log_->flush();
-                return;
+                stop_encode_thread();
+                if (frame_pump_) { frame_pump_->stop(); frame_pump_.reset(); }
+                teardown_rtsp();
+                teardown_encoder();
+                shutdown_requested_.store(true);
+                break;
             default:
                 break;
         }
