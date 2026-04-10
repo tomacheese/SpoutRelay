@@ -97,6 +97,7 @@ jobs:
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-ffmpeg
+            mingw-w64-x86_64-shaderc
 
       - name: 🔧 Configure CMake (Release)
         if: steps.version.outputs.skip == 'false'

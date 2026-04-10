@@ -47,13 +47,22 @@ if(PkgConfig_FOUND)
             endforeach()
             # -ldl is Linux-only (Windows uses LoadLibrary; no libdl exists in MinGW)
             list(REMOVE_ITEM _ffmpeg_static_libs "-ldl")
-            # shaderc_shared has no static archive in MSYS2; link it dynamically
-            # (handled separately via publisher-agent's MINGW-specific link options)
-            list(REMOVE_ITEM _ffmpeg_static_libs "-lshaderc_shared")
+            # shaderc_shared is DLL-only; replace with the static libshaderc.a
+            # (provided by mingw-w64-x86_64-shaderc; installed in ci.yml)
+            list(TRANSFORM _ffmpeg_static_libs REPLACE "^-lshaderc_shared$" "-lshaderc")
             # soxr.a is compiled with OpenMP but its .pc does not list -lgomp;
             # libgomp.a is provided by GCC's own package (mingw-w64-x86_64-gcc).
             if(NOT "-lgomp" IN_LIST _ffmpeg_static_libs)
                 list(APPEND _ffmpeg_static_libs "-lgomp")
+            endif()
+            # libjxl.a uses the Highway SIMD library but pkg-config omits -lhwy
+            if(NOT "-lhwy" IN_LIST _ffmpeg_static_libs)
+                list(APPEND _ffmpeg_static_libs "-lhwy")
+            endif()
+            # rav1e (Rust) calls Windows NT APIs (NtWriteFile, RtlNtStatusToDosError)
+            # that are not in MinGW's default auto-linked libs
+            if(NOT "-lntdll" IN_LIST _ffmpeg_static_libs)
+                list(APPEND _ffmpeg_static_libs "-lntdll")
             endif()
 
             set(FFMPEG_LIBRARIES ${_ffmpeg_static_libs})
@@ -194,8 +203,8 @@ add_executable(publisher-agent src/main.cpp)
 target_link_libraries(publisher-agent PRIVATE publisher_lib)
 
 # Static-link the C++ runtime and prefer static archives for all deps.
-# -dl is excluded from FFMPEG_LIBRARIES (Linux-only).
-# shaderc_shared has no static archive, so it is linked dynamically below.
+# Special exclusions in FFMPEG_LIBRARIES (see above):
+#   -ldl removed (Linux-only), shaderc_shared→shaderc, -lgomp/-lhwy/-lntdll added.
 # rav1e and rsvg-2 both embed the Rust standard library; --allow-multiple-definition
 # prevents a duplicate-symbol link failure.
 if(MINGW)
@@ -205,9 +214,6 @@ if(MINGW)
         -static-libstdc++
         -Wl,--allow-multiple-definition
     )
-    # shaderc_shared is Vulkan/SPIR-V; link it as a DLL even in -static mode.
-    # -Bdynamic/-Bstatic wrap overrides the global -static for this lib only.
-    target_link_libraries(publisher-agent PRIVATE "-Wl,-Bdynamic,-lshaderc_shared,-Bstatic")
 endif()
 
 # Test Spout sender (for E2E testing)
