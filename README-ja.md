@@ -27,16 +27,14 @@
 
 ## クイックスタート
 
-> **通常のユーザーの方へ:** [GitHub Releases](https://github.com/tomacheese/SpoutRelay/releases/latest) からビルド済みバイナリをダウンロードしてください。  
-> ソースからビルドする場合は、後述の [ソースからビルド](#ソースからビルド) を参照してください。
-
 ### 1. Releases からダウンロード
 
 1. [最新リリース](https://github.com/tomacheese/SpoutRelay/releases/latest) を開く
 2. `spout-rtsp-publisher-vX.Y.Z-win64.zip` をダウンロード
 3. 任意のフォルダ（例: `C:\Tools\SpoutRelay\`）に展開
 
-展開フォルダには以下が含まれます：
+展開フォルダには以下が含まれます。
+
 - `publisher-agent.exe` — 本体実行ファイル
 - `*.dll` — FFmpeg LGPL 共有ライブラリ（同じフォルダに置く必要があります）
 - `config.example.json` — 設定テンプレート（コメント付き）
@@ -44,7 +42,7 @@
 
 ### 2. 設定ファイルを作成
 
-`config.example.json` を同じフォルダに `config.json` としてコピーし、最低限以下を設定します：
+`config.example.json` を同じフォルダに `config.json` としてコピーし、最低限以下を設定します。
 
 ```json
 {
@@ -62,9 +60,9 @@ publisher-agent.exe --config config.json
 ```
 
 配信が始まると `rtsp://<mediamtx-host>:8554/live` で視聴できます。  
-VLC、FFplay などの RTSP 対応プレイヤーで確認できます：
+VLC、FFplay などの RTSP 対応プレイヤーで確認できます。
 
-```bash
+```powershell
 ffplay rtsp://<mediamtx-host>:8554/live
 ```
 
@@ -74,7 +72,7 @@ ffplay rtsp://<mediamtx-host>:8554/live
 
 ## ソースからビルド
 
-```bash
+```powershell
 # 1. ディレクトリへ展開
 cd publisher
 
@@ -102,7 +100,7 @@ build/publisher-agent.exe --config config/config.json
 
 ## 使い方
 
-```
+```powershell
 publisher-agent.exe --config <config.json へのパス>
 publisher-agent.exe --help
 ```
@@ -125,7 +123,7 @@ publisher-agent.exe --help
 
 ## ディレクトリ構成
 
-```
+```text
 publisher/
 ├── src/
 │   ├── app/          # Supervisor（オーケストレーター）+ StateMachine
@@ -159,14 +157,17 @@ publisher/
 
 ## テストの実行
 
-```bash
+```powershell
 build/tests/publisher_tests.exe
 # 期待結果: PASSED: 22, FAILED: 0
 ```
 
 ## ライセンス
 
-本プロジェクトは以下を使用しています：
+このプロジェクトのライセンスは [MIT License](LICENSE) です。
+
+本プロジェクトは以下を使用しています。
+
 - [Spout2](https://github.com/leadedge/Spout2) — BSD-2-Clause
 - [FFmpeg](https://ffmpeg.org/) — LGPL v2.1+（win64-lgpl-shared ビルド）
 - [nlohmann/json](https://github.com/nlohmann/json) — MIT

@@ -24,7 +24,7 @@ scoop install cmake ninja
 
 [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases) から `ffmpeg-master-latest-win64-lgpl-shared.zip` をダウンロードし、展開して `deps/ffmpeg/` に配置します。
 
-```
+```text
 deps/ffmpeg/
 ├── bin/          # avcodec-62.dll 等の DLL
 ├── include/      # libavcodec/ 等のヘッダー
@@ -35,7 +35,7 @@ deps/ffmpeg/
 
 [Spout2 GitHub](https://github.com/leadedge/Spout2) をクローンまたはダウンロードし `deps/Spout2/` に配置します。
 
-```
+```text
 deps/Spout2/
 └── SPOUTSDK/
     ├── SpoutGL/          # SpoutCopy, SpoutDirectX, SpoutFrameCount 等
@@ -47,7 +47,7 @@ deps/Spout2/
 
 CMake の `FetchContent` により configure 時に自動でダウンロードされます。手動配置は不要です。
 
-## ビルド手順
+## 手順
 
 ### 1. CMake 設定
 
@@ -97,7 +97,7 @@ Copy-Item deps\ffmpeg\bin\*.dll publisher\build\
 
 ## ビルド出力
 
-```
+```text
 publisher/build/
 ├── publisher-agent.exe       # メインアプリ
 ├── spout_test_sender.exe     # E2E テスト用 Spout センダー
@@ -113,7 +113,7 @@ publisher/build/
 
 期待される出力:
 
-```
+```text
 All tests passed.
 ```
 

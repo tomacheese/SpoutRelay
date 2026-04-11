@@ -2,7 +2,7 @@
 
 ## システム概要
 
-```
+```text
 ┌─────────────────┐      DX11共有テクスチャ      ┌──────────────────────┐
 │   Spout送信側    │ ─────────────────────────▶  │   SpoutMonitor       │
 │ (VRChat等)      │      (GPU shared memory)     │   (SpoutDX)          │
@@ -51,7 +51,7 @@
 
 ## データフロー
 
-```
+```text
 [SpoutDX GPU受信]
        │
        │  ReceiveImage() → RGBA バイト列
@@ -77,7 +77,7 @@
 
 ## スレッドモデル
 
-```
+```text
 メインスレッド (Supervisor::run)
 │
 ├── ステートマシンループ
@@ -102,7 +102,7 @@
 
 ## エンコーダーフォールバック
 
-```
+```text
 avcodec_find_encoder("h264_nvenc")
       │
       ├── 成功 → avcodec_open2()

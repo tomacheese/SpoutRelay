@@ -2,7 +2,7 @@
 
 設定ファイルは JSON 形式です。`--config` オプションでパスを指定します。
 
-```
+```powershell
 publisher-agent.exe --config config/config.json
 ```
 
@@ -108,7 +108,7 @@ for ($i = 0; $i -lt 10; $i++) {
 
 ### コーデック選択の優先順位
 
-```
+```text
 codec → avcodec_open2 成功？ → 使用
                      ↓ 失敗
 fallback_codec → avcodec_open2 成功？ → 使用

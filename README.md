@@ -27,9 +27,6 @@ A Windows application that captures frames from a [Spout2](https://spout.zeal.co
 
 ## Quick Start
 
-> **For most users:** download the pre-built binary from [GitHub Releases](https://github.com/tomacheese/SpoutRelay/releases/latest).  
-> If you need to build from source, see [Build from Source](#build-from-source) below.
-
 ### 1. Download from Releases
 
 1. Open the [latest release](https://github.com/tomacheese/SpoutRelay/releases/latest)
@@ -37,6 +34,7 @@ A Windows application that captures frames from a [Spout2](https://spout.zeal.co
 3. Extract the zip to any folder (e.g. `C:\Tools\SpoutRelay\`)
 
 The extracted folder contains:
+
 - `publisher-agent.exe` — the main executable
 - `*.dll` — FFmpeg LGPL shared libraries (must stay in the same folder)
 - `config.example.json` — annotated configuration template
@@ -64,7 +62,7 @@ publisher-agent.exe --config config.json
 The stream becomes available at `rtsp://<mediamtx-host>:8554/live`.  
 Use VLC, FFplay, or any RTSP-capable player to verify:
 
-```bash
+```powershell
 ffplay rtsp://<mediamtx-host>:8554/live
 ```
 
@@ -74,7 +72,7 @@ Press `Ctrl+C` to stop the publisher gracefully.
 
 ## Build from Source
 
-```bash
+```powershell
 # 1. Clone / extract into a directory
 cd publisher
 
@@ -102,7 +100,7 @@ The stream is then available at `rtsp://<server-ip>:8554/live` (VLC, FFplay, etc
 
 ## Usage
 
-```
+```powershell
 publisher-agent.exe --config <path-to-config.json>
 publisher-agent.exe --help
 ```
@@ -125,7 +123,7 @@ Full reference: [`docs/configuration.md`](docs/configuration.md)
 
 ## Project Layout
 
-```
+```text
 publisher/
 ├── src/
 │   ├── app/          # Supervisor (orchestrator) + StateMachine
@@ -163,14 +161,17 @@ publisher/
 
 The test suite uses a custom test runner (no external test framework required).
 
-```bash
+```powershell
 build/tests/publisher_tests.exe
 # Expected output ends with: All N tests passed.
 ```
 
 ## License
 
+The project is licensed under the [MIT License](LICENSE).
+
 This project uses:
+
 - [Spout2](https://github.com/leadedge/Spout2) — BSD-2-Clause
 - [FFmpeg](https://ffmpeg.org/) — LGPL-2.1+
 - [nlohmann/json](https://github.com/nlohmann/json) — MIT

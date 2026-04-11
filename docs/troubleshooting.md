@@ -73,10 +73,12 @@ ffmpeg -encoders 2>$null | Select-String "h264_mf"
 ```
 
 NVENC が表示されない場合:
+
 - NVIDIA GPU が搭載されていない、またはドライバーが古い
 - FFmpeg が NVENC サポート付きでビルドされていない
 
 h264_mf が表示されない場合:
+
 - Windows Media Foundation が利用不可の環境（Server Core など）
 - `codec` および `fallback_codec` の両方を使用環境に合わせて設定してください
 

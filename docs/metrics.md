@@ -88,7 +88,7 @@
 
 ### ファイル名
 
-```
+```text
 logs/<instance_name>.jsonl
 ```
 
