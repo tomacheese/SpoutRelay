@@ -1,0 +1,16 @@
+# Local config with real environment values
+config/config.json
+
+# Build artifacts and CMake FetchContent cache
+build/
+
+# Runtime state
+state/
+logs/
+
+# Downloaded binary dependencies (not committed)
+deps/ffmpeg/
+deps/mediamtx/
+
+# Test temp files
+test_*_tmp.json

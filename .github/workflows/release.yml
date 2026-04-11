@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 🚀 Version & Release
+    runs-on: windows-latest
+    if: github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: 🛎 Checkout (full history)
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Always check out the exact commit that passed CI, not HEAD of master.
+          # workflow_run uses default branch by default, so we must pin the SHA explicitly.
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: 🏷 Bump version and push tag
+        id: tag-version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: "minor"
+          custom_release_rules: "feat:minor:✨ Features,fix:patch:🐛 Fixes,docs:patch:📰 Docs,chore:patch:🎨 Chore,pref:patch:🎈 Performance improvements,refactor:patch:🧹 Refactoring,build:patch:🔍 Build,ci:patch:🔍 CI,revert:patch:⏪ Revert,style:patch:🧹 Style,test:patch:👀 Test,release:major:📦 Release"
+
+      - name: 🏗 Setup MSYS2 / MinGW64
+        uses: msys2/setup-msys2@cafece8e6baf9247cf9b1bf95097b0b983cc558d # v2.31.0
+        with:
+          msystem: MINGW64
+          update: true
+          cache: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkg-config
+
+      - name: 📥 Download FFmpeg LGPL shared build
+        shell: pwsh
+        run: |
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-lgpl-shared.zip"
+          $zip = "$env:TEMP\ffmpeg-lgpl.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+          Expand-Archive -Path $zip -DestinationPath "$env:TEMP\ffmpeg-lgpl" -Force
+          $inner = (Get-ChildItem "$env:TEMP\ffmpeg-lgpl" | Select-Object -First 1).FullName
+          New-Item -ItemType Directory -Force deps\ffmpeg | Out-Null
+          Copy-Item "$inner\*" deps\ffmpeg -Recurse -Force
+          Write-Host "FFmpeg LGPL: $((& deps\ffmpeg\bin\ffmpeg.exe -version 2>&1)[0])"
+
+      - name: 🔧 Configure CMake (Release)
+        shell: msys2 {0}
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=toolchain-mingw.cmake \
+            -DBUILD_TESTS=OFF
+        env:
+          MINGW_BIN: /mingw64/bin
+          MINGW_ROOT: /mingw64/x86_64-w64-mingw32
+
+      - name: 🏗️ Build release binary
+        shell: msys2 {0}
+        run: cmake --build build --parallel
+
+      - name: 📦 Package release archive
+        id: package
+        shell: pwsh
+        run: |
+          $VERSION = "${{ steps.tag-version.outputs.new_tag }}"
+          $ARCHIVE = "spout-rtsp-publisher-${VERSION}-win64.zip"
+          New-Item -ItemType Directory -Force dist | Out-Null
+
+          Copy-Item build\publisher-agent.exe dist\
+
+          # Bundle FFmpeg LGPL DLLs
+          Copy-Item deps\ffmpeg\bin\*.dll dist\
+
+          if (Test-Path config\config.example.json) { Copy-Item config\config.example.json dist\ }
+          if (Test-Path README.md) { Copy-Item README.md dist\ }
+
+          # Create zip using PowerShell (7z is not available on GitHub-hosted runners)
+          Compress-Archive -Path dist\* -DestinationPath $ARCHIVE -Force
+
+          "archive=$ARCHIVE" >> $env:GITHUB_OUTPUT
+          $count = (Get-ChildItem dist).Count
+          Write-Host "Packaged $count files into $ARCHIVE"
+
+      - name: 🎉 Create GitHub Release
+        uses: ncipollo/release-action@v1.21.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag: ${{ steps.tag-version.outputs.new_tag }}
+          name: ${{ steps.tag-version.outputs.new_tag }}
+          body: ${{ steps.tag-version.outputs.changelog }}
+          artifacts: ${{ steps.package.outputs.archive }}
+          draft: false
+          prerelease: false
