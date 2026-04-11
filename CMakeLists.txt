@@ -144,14 +144,14 @@ if(FFMPEG_LIBRARY_DIRS)
     target_link_directories(publisher_lib PUBLIC ${FFMPEG_LIBRARY_DIRS})
 endif()
 
-add_executable(publisher-agent src/main.cpp)
-target_link_libraries(publisher-agent PRIVATE publisher_lib)
+add_executable(spout-relay src/main.cpp)
+target_link_libraries(spout-relay PRIVATE publisher_lib)
 
 # Semi-static: embed C++ runtime and winpthread into the EXE so the
 # redistributable does not require libgcc/libstdc++/libwinpthread DLLs.
 # FFmpeg and codec DLLs are bundled separately in the distribution package.
 if(MINGW)
-    target_link_options(publisher-agent PRIVATE
+    target_link_options(spout-relay PRIVATE
         -static-libgcc
         -static-libstdc++
         -Wl,-Bstatic,-lwinpthread,-Bdynamic
