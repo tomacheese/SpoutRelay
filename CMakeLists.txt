@@ -147,14 +147,21 @@ endif()
 add_executable(spout-relay src/main.cpp)
 target_link_libraries(spout-relay PRIVATE publisher_lib)
 
-# Semi-static: embed C++ runtime and winpthread into the EXE so the
-# redistributable does not require libgcc/libstdc++/libwinpthread DLLs.
-# FFmpeg and codec DLLs are bundled separately in the distribution package.
+# Semi-static: link the MinGW C/C++ runtime and winpthread so the EXE does
+# not depend on those runtimes being installed system-wide on the target.
+# The distribution package may still bundle DLLs alongside the EXE
+# (e.g. FFmpeg, codec, or MinGW runtime DLLs) as needed.
+#
+# NOTE: --whole-archive is required for winpthread because the linker may
+# process -lwinpthread before libstdc++/libgcc add their pthread references,
+# causing those later references to resolve against the dynamic DLL instead.
+# --whole-archive forces the entire winpthread archive to be embedded
+# regardless of link order.
 if(MINGW)
     target_link_options(spout-relay PRIVATE
         -static-libgcc
         -static-libstdc++
-        -Wl,-Bstatic,-lwinpthread,-Bdynamic
+        -Wl,-Bstatic,--whole-archive,-lwinpthread,--no-whole-archive,-Bdynamic
     )
 endif()
 
