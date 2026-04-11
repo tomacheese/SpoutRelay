@@ -60,7 +60,7 @@ Spout2 source code is compiled statically into the application.
 
 ## winpthread (mingw-w64)
 
-- **License:** BSD 2-Clause (winpthread) and MIT (mingw-w64 headers)
+- **License:** BSD 2-Clause
 - **Source:** <https://sourceforge.net/projects/mingw-w64/>
 
 The distribution package includes `libwinpthread-1.dll`, which is the POSIX
