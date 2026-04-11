@@ -14,16 +14,24 @@
 
 ## 動作要件
 
+### 実行時
+
+| コンポーネント | 備考 |
+|--------------|------|
+| Windows 10 / 11 (x64) | 必須 |
+| NVIDIA GPU | 任意 — NVENC ハードウェア H.264 が使用可能。なければ `h264_mf`（Windows Media Foundation）にフォールバック |
+| FFmpeg 共有ライブラリ | リリース ZIP に同梱済み（`avcodec`、`avformat`、`avutil`、`swscale`、`swresample`） |
+| RTSP サーバー | [MediaMTX](https://github.com/bluenviron/mediamtx) v1.x 等 — ストリームの受信側として別途起動が必要 |
+
+### ビルド時
+
 | コンポーネント | バージョン |
 |--------------|----------|
-| Windows | 10 / 11 (x64) |
-| NVIDIA GPU（任意） | NVENC 対応カード |
-| [FFmpeg 共有ライブラリ](https://github.com/BtbN/FFmpeg-Builds/releases) | win64-lgpl-shared, avcodec ≥ 62 |
-| [Spout2 SDK](https://github.com/leadedge/Spout2) | `deps/` に同梱 |
-| [MediaMTX](https://github.com/bluenviron/mediamtx) | v1.x（受信側） |
 | GCC (MinGW-w64) | ≥ 13 推奨 |
 | CMake | ≥ 3.20 |
 | Ninja | 最新版 |
+| FFmpeg 開発ファイル | [win64-lgpl-shared](https://github.com/BtbN/FFmpeg-Builds/releases)、avcodec ≥ 62 |
+| Spout2 SDK | git サブモジュールとして同梱（`deps/Spout2`） |
 
 ## クイックスタート
 

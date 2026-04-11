@@ -14,16 +14,24 @@ A Windows application that captures frames from a [Spout2](https://spout.zeal.co
 
 ## Requirements
 
+### Runtime
+
+| Component | Notes |
+|-----------|-------|
+| Windows 10 / 11 (x64) | Required |
+| NVIDIA GPU | Optional — enables NVENC hardware H.264; falls back to `h264_mf` (Windows Media Foundation) |
+| FFmpeg shared libs | Bundled in the release zip (`avcodec`, `avformat`, `avutil`, `swscale`, `swresample`) |
+| RTSP server | e.g. [MediaMTX](https://github.com/bluenviron/mediamtx) v1.x — runs separately as the stream receiver |
+
+### Build
+
 | Component | Version |
 |-----------|---------|
-| Windows | 10 / 11 (x64) |
-| NVIDIA GPU (optional) | any NVENC-capable card |
-| [FFmpeg shared libs](https://github.com/BtbN/FFmpeg-Builds/releases) | win64-lgpl-shared, avcodec ≥ 62 |
-| [Spout2 SDK](https://github.com/leadedge/Spout2) | included in `deps/` |
-| [MediaMTX](https://github.com/bluenviron/mediamtx) | v1.x (receiver side) |
 | GCC (MinGW-w64) | ≥ 13 recommended |
 | CMake | ≥ 3.20 |
 | Ninja | any recent |
+| FFmpeg dev files | [win64-lgpl-shared](https://github.com/BtbN/FFmpeg-Builds/releases), avcodec ≥ 62 |
+| Spout2 SDK | included as git submodule (`deps/Spout2`) |
 
 ## Quick Start
 
