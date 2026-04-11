@@ -27,6 +27,53 @@
 
 ## クイックスタート
 
+> **通常のユーザーの方へ:** [GitHub Releases](https://github.com/tomacheese/SpoutRelay/releases/latest) からビルド済みバイナリをダウンロードしてください。  
+> ソースからビルドする場合は、後述の [ソースからビルド](#ソースからビルド) を参照してください。
+
+### 1. Releases からダウンロード
+
+1. [最新リリース](https://github.com/tomacheese/SpoutRelay/releases/latest) を開く
+2. `spout-rtsp-publisher-vX.Y.Z-win64.zip` をダウンロード
+3. 任意のフォルダ（例: `C:\Tools\SpoutRelay\`）に展開
+
+展開フォルダには以下が含まれます：
+- `publisher-agent.exe` — 本体実行ファイル
+- `*.dll` — FFmpeg LGPL 共有ライブラリ（同じフォルダに置く必要があります）
+- `config.example.json` — 設定テンプレート（コメント付き）
+- `README.md`
+
+### 2. 設定ファイルを作成
+
+`config.example.json` を同じフォルダに `config.json` としてコピーし、最低限以下を設定します：
+
+```json
+{
+  "spout": { "sender_name": "YourSpoutSender" },
+  "rtsp":  { "url": "rtsp://<mediamtx-host>:8554/live" }
+}
+```
+
+`YourSpoutSender` は Spout2 送信アプリ側で表示されている名前に、`<mediamtx-host>` は [MediaMTX](https://github.com/bluenviron/mediamtx) サーバーの IP アドレスまたはホスト名に置き換えてください。
+
+### 3. 起動
+
+```bat
+publisher-agent.exe --config config.json
+```
+
+配信が始まると `rtsp://<mediamtx-host>:8554/live` で視聴できます。  
+VLC、FFplay などの RTSP 対応プレイヤーで確認できます：
+
+```bash
+ffplay rtsp://<mediamtx-host>:8554/live
+```
+
+`Ctrl+C` でグレースフルシャットダウンします。
+
+---
+
+## ソースからビルド
+
 ```bash
 # 1. ディレクトリへ展開
 cd publisher

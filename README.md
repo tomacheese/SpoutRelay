@@ -27,6 +27,53 @@ A Windows application that captures frames from a [Spout2](https://spout.zeal.co
 
 ## Quick Start
 
+> **For most users:** download the pre-built binary from [GitHub Releases](https://github.com/tomacheese/SpoutRelay/releases/latest).  
+> If you need to build from source, see [Build from Source](#build-from-source) below.
+
+### 1. Download from Releases
+
+1. Open the [latest release](https://github.com/tomacheese/SpoutRelay/releases/latest)
+2. Download `spout-rtsp-publisher-vX.Y.Z-win64.zip`
+3. Extract the zip to any folder (e.g. `C:\Tools\SpoutRelay\`)
+
+The extracted folder contains:
+- `publisher-agent.exe` — the main executable
+- `*.dll` — FFmpeg LGPL shared libraries (must stay in the same folder)
+- `config.example.json` — annotated configuration template
+- `README.md`
+
+### 2. Create your config
+
+Copy `config.example.json` to `config.json` in the same folder and set at minimum:
+
+```json
+{
+  "spout": { "sender_name": "YourSpoutSender" },
+  "rtsp":  { "url": "rtsp://<mediamtx-host>:8554/live" }
+}
+```
+
+Replace `YourSpoutSender` with the name shown in your Spout2 sender application, and `<mediamtx-host>` with the IP address or hostname of your [MediaMTX](https://github.com/bluenviron/mediamtx) server.
+
+### 3. Run
+
+```bat
+publisher-agent.exe --config config.json
+```
+
+The stream becomes available at `rtsp://<mediamtx-host>:8554/live`.  
+Use VLC, FFplay, or any RTSP-capable player to verify:
+
+```bash
+ffplay rtsp://<mediamtx-host>:8554/live
+```
+
+Press `Ctrl+C` to stop the publisher gracefully.
+
+---
+
+## Build from Source
+
 ```bash
 # 1. Clone / extract into a directory
 cd publisher
