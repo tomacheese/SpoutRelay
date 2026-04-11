@@ -55,3 +55,28 @@ Spout2 source code is compiled statically into the application.
 
 - **License:** MIT  
 - **Source:** <https://github.com/nlohmann/json>
+
+---
+
+## winpthread (mingw-w64)
+
+- **License:** BSD 2-Clause (winpthread) and MIT (mingw-w64 headers)
+- **Source:** <https://sourceforge.net/projects/mingw-w64/>
+
+The distribution package includes `libwinpthread-1.dll`, which is the POSIX
+threads implementation for Windows provided by the mingw-w64 project.
+
+This DLL is required at runtime as the C++ standard library thread primitives
+(`std::thread`, `std::mutex`, etc.) depend on it when built with MinGW-w64.
+
+Copyright (c) 2011, Kaz Kojima and others (winpthread)  
+Copyright (c) 2009, 2010 by Mingw-w64 project
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
