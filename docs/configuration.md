@@ -3,7 +3,7 @@
 設定ファイルは JSON 形式です。`--config` オプションでパスを指定します。
 
 ```powershell
-publisher-agent.exe --config config/config.json
+spout-relay.exe --config config/config.json
 ```
 
 ## 完全なサンプル

@@ -7,7 +7,7 @@
 設定ファイルが見つかりません。`--config` オプションで絶対パスを指定してください。
 
 ```powershell
-.\publisher-agent.exe --config C:\path\to\config\config.json
+.\spout-relay.exe --config C:\path\to\config\config.json
 ```
 
 ### 設定のバリデーションエラー（例: `spout.sender_name must not be empty`）
@@ -172,7 +172,7 @@ Start-Process publisher\build\spout_test_sender.exe
 
 # 3. Publisher 起動
 cd publisher\build
-.\publisher-agent.exe --config ..\config\config.json
+.\spout-relay.exe --config ..\config\config.json
 
 # 4. FFprobe で確認
 ffprobe rtsp://192.168.0.100:8554/live

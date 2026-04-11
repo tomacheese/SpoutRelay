@@ -129,8 +129,8 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p dist
-          cp build/publisher-agent.exe dist/
-          strip dist/publisher-agent.exe
+          cp build/spout-relay.exe dist/
+          strip dist/spout-relay.exe
           # Bundle FFmpeg LGPL DLLs (only the 7 core FFmpeg DLLs — no GPL codecs)
           cp deps/ffmpeg/bin/*.dll dist/
           echo "Packaged $(ls dist/ | wc -l) files (EXE + FFmpeg LGPL DLLs)"
@@ -138,7 +138,7 @@ jobs:
       - name: 📦 Upload artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: publisher-agent-win64
+          name: spout-relay-win64
           path: dist/
 
       - name: 📦 Package release archive
@@ -147,7 +147,7 @@ jobs:
         shell: pwsh
         run: |
           $VERSION = "${{ needs.calc-version.outputs.tag }}"
-          $ARCHIVE = "spout-rtsp-publisher-${VERSION}-win64.zip"
+          $ARCHIVE = "spout-relay-${VERSION}-win64.zip"
           # dist/ は前のステップで strip 済み EXE と DLL が入っている
           if (Test-Path config\config.example.json) { Copy-Item config\config.example.json dist\ }
           if (Test-Path README.md) { Copy-Item README.md dist\ }

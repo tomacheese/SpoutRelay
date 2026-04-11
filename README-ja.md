@@ -38,12 +38,12 @@
 ### 1. Releases からダウンロード
 
 1. [最新リリース](https://github.com/tomacheese/SpoutRelay/releases/latest) を開く
-2. `spout-rtsp-publisher-vX.Y.Z-win64.zip` をダウンロード
+2. `spout-relay-vX.Y.Z-win64.zip` をダウンロード
 3. 任意のフォルダ（例: `C:\Tools\SpoutRelay\`）に展開
 
 展開フォルダには以下が含まれます。
 
-- `publisher-agent.exe` — 本体実行ファイル
+- `spout-relay.exe` — 本体実行ファイル
 - `*.dll` — FFmpeg LGPL 共有ライブラリ（同じフォルダに置く必要があります）
 - `config.example.json` — 設定テンプレート（コメント付き）
 - `README.md`
@@ -64,7 +64,7 @@
 ### 3. 起動
 
 ```bat
-publisher-agent.exe --config config.json
+spout-relay.exe --config config.json
 ```
 
 配信が始まると `rtsp://<mediamtx-host>:8554/live` で視聴できます。  
@@ -101,7 +101,7 @@ cp config/config.example.json config/config.json
 deps/mediamtx/mediamtx.exe
 
 # 7. 起動
-build/publisher-agent.exe --config config/config.json
+build/spout-relay.exe --config config/config.json
 ```
 
 配信開始後、`rtsp://<サーバーIP>:8554/live` で VLC や FFplay から視聴できます。
@@ -109,8 +109,8 @@ build/publisher-agent.exe --config config/config.json
 ## 使い方
 
 ```powershell
-publisher-agent.exe --config <config.json へのパス>
-publisher-agent.exe --help
+spout-relay.exe --config <config.json へのパス>
+spout-relay.exe --help
 ```
 
 `Ctrl+C` または `CTRL_CLOSE_EVENT` でグレースフルシャットダウンします。
