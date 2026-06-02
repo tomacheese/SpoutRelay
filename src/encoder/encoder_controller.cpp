@@ -3,6 +3,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/opt.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/pixfmt.h>
 #include <libswscale/swscale.h>
 }
 
@@ -74,6 +75,15 @@ bool EncoderController::init(const EncoderConfig& config,
         ctx->pix_fmt      = pick_pix_fmt(codec);
         if (config.threads > 0) ctx->thread_count = config.threads;
 
+        // 720p 以上は BT.709、それ未満は BT.601 を使用する
+        // Spout 入力は PC モニター由来の full-range sRGB なので、
+        // color_range は JPEG (full) として宣言し sws にも full range 出力を指示する
+        bool is_hd = (width >= 1280 || height >= 720);
+        ctx->color_range     = AVCOL_RANGE_JPEG;
+        ctx->colorspace      = is_hd ? AVCOL_SPC_BT709     : AVCOL_SPC_BT470BG;
+        ctx->color_primaries = is_hd ? AVCOL_PRI_BT709     : AVCOL_PRI_BT470M;
+        ctx->color_trc       = is_hd ? AVCOL_TRC_BT709     : AVCOL_TRC_GAMMA28;
+
         AVDictionary* opts = nullptr;
         bool is_nvenc = (codec_name.find("nvenc") != std::string::npos ||
                          codec_name.find("amf")   != std::string::npos ||
@@ -117,6 +127,19 @@ bool EncoderController::init(const EncoderConfig& config,
             avcodec_free_context(&impl_->codec_ctx);
             error = "sws_getContext failed";
             continue;
+        }
+
+        // 変換行列と色域を明示的に設定する
+        // 入力 RGBA は full range (JPEG)、出力 YUV も full range で統一する
+        {
+            int sws_cs = is_hd ? SWS_CS_ITU709 : SWS_CS_ITU601;
+            const int* in_coeff  = sws_getCoefficients(SWS_CS_DEFAULT);
+            const int* out_coeff = sws_getCoefficients(sws_cs);
+            // srcRange=1: full range 入力、dstRange=1: full range 出力
+            sws_setColorspaceDetails(impl_->sws_ctx,
+                in_coeff,  1,
+                out_coeff, 1,
+                0, 1 << 16, 1 << 16);
         }
 
         impl_->yuv_frame = av_frame_alloc();
@@ -231,13 +254,17 @@ EncoderController::CodecInfo EncoderController::get_codec_info() const {
     CodecInfo ci;
     if (!impl_->codec_ctx) return ci;
     AVCodecContext* ctx = impl_->codec_ctx;
-    ci.codec_id      = static_cast<int>(ctx->codec_id);
-    ci.width         = ctx->width;
-    ci.height        = ctx->height;
-    ci.fps           = config_.fps;
-    ci.bit_rate      = static_cast<int>(ctx->bit_rate);
-    ci.time_base_num = ctx->time_base.num;
-    ci.time_base_den = ctx->time_base.den;
+    ci.codec_id        = static_cast<int>(ctx->codec_id);
+    ci.width           = ctx->width;
+    ci.height          = ctx->height;
+    ci.fps             = config_.fps;
+    ci.bit_rate        = static_cast<int>(ctx->bit_rate);
+    ci.time_base_num   = ctx->time_base.num;
+    ci.time_base_den   = ctx->time_base.den;
+    ci.color_range     = static_cast<int>(ctx->color_range);
+    ci.colorspace      = static_cast<int>(ctx->colorspace);
+    ci.color_primaries = static_cast<int>(ctx->color_primaries);
+    ci.color_trc       = static_cast<int>(ctx->color_trc);
     if (ctx->extradata && ctx->extradata_size > 0) {
         ci.extradata.assign(ctx->extradata,
                             ctx->extradata + ctx->extradata_size);

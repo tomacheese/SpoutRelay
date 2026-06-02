@@ -3,6 +3,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/opt.h>
 #include <libavutil/mathematics.h>
+#include <libavutil/pixfmt.h>
 }
 
 #include "rtsp/rtsp_publisher_client.hpp"
@@ -46,12 +47,16 @@ bool RtspPublisherClient::connect(const RtspConfig& config,
     }
 
     st->id                 = 0;
-    st->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
-    st->codecpar->codec_id   = static_cast<AVCodecID>(codec_info.codec_id);
-    st->codecpar->width      = codec_info.width;
-    st->codecpar->height     = codec_info.height;
-    st->codecpar->bit_rate   = codec_info.bit_rate;
-    st->time_base            = {codec_info.time_base_num, codec_info.time_base_den};
+    st->codecpar->codec_type     = AVMEDIA_TYPE_VIDEO;
+    st->codecpar->codec_id       = static_cast<AVCodecID>(codec_info.codec_id);
+    st->codecpar->width          = codec_info.width;
+    st->codecpar->height         = codec_info.height;
+    st->codecpar->bit_rate       = codec_info.bit_rate;
+    st->codecpar->color_range    = static_cast<AVColorRange>(codec_info.color_range);
+    st->codecpar->color_space    = static_cast<AVColorSpace>(codec_info.colorspace);
+    st->codecpar->color_primaries = static_cast<AVColorPrimaries>(codec_info.color_primaries);
+    st->codecpar->color_trc      = static_cast<AVColorTransferCharacteristic>(codec_info.color_trc);
+    st->time_base                = {codec_info.time_base_num, codec_info.time_base_den};
 
     if (!codec_info.extradata.empty()) {
         st->codecpar->extradata = static_cast<uint8_t*>(

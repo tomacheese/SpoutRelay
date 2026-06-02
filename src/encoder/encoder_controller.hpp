@@ -48,6 +48,11 @@ public:
         int time_base_num = 1;
         int time_base_den = 30;
         std::vector<uint8_t> extradata; // SPS/PPS
+        // 色空間メタデータ（AVColorRange / AVColorSpace / AVColorPrimaries / AVColorTransferCharacteristic の int 値）
+        int color_range      = 0; // AVCOL_RANGE_UNSPECIFIED
+        int colorspace       = 2; // AVCOL_SPC_UNSPECIFIED
+        int color_primaries  = 2; // AVCOL_PRI_UNSPECIFIED
+        int color_trc        = 2; // AVCOL_TRC_UNSPECIFIED
     };
 
     CodecInfo get_codec_info() const;
