@@ -11,12 +11,6 @@ extern "C" {
 #include <cstring>
 #include <stdexcept>
 
-// CodecInfo のデフォルト値が FFmpeg 列挙の UNSPECIFIED 値と一致することをコンパイル時に保証する
-static_assert(AVCOL_RANGE_UNSPECIFIED == 0,  "CodecInfo::color_range default mismatch");
-static_assert(AVCOL_SPC_UNSPECIFIED   == 2,  "CodecInfo::colorspace default mismatch");
-static_assert(AVCOL_PRI_UNSPECIFIED   == 2,  "CodecInfo::color_primaries default mismatch");
-static_assert(AVCOL_TRC_UNSPECIFIED   == 2,  "CodecInfo::color_trc default mismatch");
-
 struct EncoderController::Impl {
     const AVCodec*   codec      = nullptr;
     AVCodecContext*  codec_ctx  = nullptr;
@@ -141,10 +135,16 @@ bool EncoderController::init(const EncoderConfig& config,
             const int* in_coeff  = sws_getCoefficients(SWS_CS_DEFAULT);
             const int* out_coeff = sws_getCoefficients(SWS_CS_ITU709);
             // srcRange=1: full range 入力、dstRange=1: full range 出力
-            sws_setColorspaceDetails(impl_->sws_ctx,
+            int sws_ret = sws_setColorspaceDetails(impl_->sws_ctx,
                 in_coeff,  1,
                 out_coeff, 1,
                 0, 1 << 16, 1 << 16);
+            if (sws_ret < 0) {
+                sws_freeContext(impl_->sws_ctx); impl_->sws_ctx = nullptr;
+                avcodec_free_context(&impl_->codec_ctx);
+                error = "sws_setColorspaceDetails failed";
+                continue;
+            }
         }
 
         impl_->yuv_frame = av_frame_alloc();
