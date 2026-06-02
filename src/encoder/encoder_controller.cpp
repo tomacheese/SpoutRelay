@@ -11,6 +11,12 @@ extern "C" {
 #include <cstring>
 #include <stdexcept>
 
+// CodecInfo のデフォルト値が FFmpeg 列挙の UNSPECIFIED 値と一致することをコンパイル時に保証する
+static_assert(AVCOL_RANGE_UNSPECIFIED == 0,  "CodecInfo::color_range default mismatch");
+static_assert(AVCOL_SPC_UNSPECIFIED   == 2,  "CodecInfo::colorspace default mismatch");
+static_assert(AVCOL_PRI_UNSPECIFIED   == 2,  "CodecInfo::color_primaries default mismatch");
+static_assert(AVCOL_TRC_UNSPECIFIED   == 2,  "CodecInfo::color_trc default mismatch");
+
 struct EncoderController::Impl {
     const AVCodec*   codec      = nullptr;
     AVCodecContext*  codec_ctx  = nullptr;
@@ -75,14 +81,14 @@ bool EncoderController::init(const EncoderConfig& config,
         ctx->pix_fmt      = pick_pix_fmt(codec);
         if (config.threads > 0) ctx->thread_count = config.threads;
 
-        // 720p 以上は BT.709、それ未満は BT.601 を使用する
-        // Spout 入力は PC モニター由来の full-range sRGB なので、
-        // color_range は JPEG (full) として宣言し sws にも full range 出力を指示する
-        bool is_hd = (width >= 1280 || height >= 720);
+        // Spout 入力は常に PC モニター由来の sRGB (full range) なので、
+        // 解像度によらず BT.709 で統一する。
+        // color_range は JPEG (full range, 0-255) として宣言し、
+        // sws にも full range 出力を指示することで精度損失を最小化する。
         ctx->color_range     = AVCOL_RANGE_JPEG;
-        ctx->colorspace      = is_hd ? AVCOL_SPC_BT709     : AVCOL_SPC_BT470BG;
-        ctx->color_primaries = is_hd ? AVCOL_PRI_BT709     : AVCOL_PRI_BT470M;
-        ctx->color_trc       = is_hd ? AVCOL_TRC_BT709     : AVCOL_TRC_GAMMA28;
+        ctx->colorspace      = AVCOL_SPC_BT709;
+        ctx->color_primaries = AVCOL_PRI_BT709;
+        ctx->color_trc       = AVCOL_TRC_BT709;
 
         AVDictionary* opts = nullptr;
         bool is_nvenc = (codec_name.find("nvenc") != std::string::npos ||
@@ -129,12 +135,11 @@ bool EncoderController::init(const EncoderConfig& config,
             continue;
         }
 
-        // 変換行列と色域を明示的に設定する
+        // BT.709 変換行列と full range を明示的に設定する
         // 入力 RGBA は full range (JPEG)、出力 YUV も full range で統一する
         {
-            int sws_cs = is_hd ? SWS_CS_ITU709 : SWS_CS_ITU601;
             const int* in_coeff  = sws_getCoefficients(SWS_CS_DEFAULT);
-            const int* out_coeff = sws_getCoefficients(sws_cs);
+            const int* out_coeff = sws_getCoefficients(SWS_CS_ITU709);
             // srcRange=1: full range 入力、dstRange=1: full range 出力
             sws_setColorspaceDetails(impl_->sws_ctx,
                 in_coeff,  1,
