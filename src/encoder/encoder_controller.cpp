@@ -207,18 +207,27 @@ static bool drain_encoder(AVCodecContext* ctx, AVPacket* pkt,
 
 bool EncoderController::encode(const FrameBuffer& frame,
                                 const FrameMeta& /*meta*/,
-                                std::vector<EncodedPacket>& out_packets) {
+                                std::vector<EncodedPacket>& out_packets,
+                                bool content_changed) {
     if (!impl_->codec_ctx || !impl_->sws_ctx || !impl_->yuv_frame) return false;
 
-    // Convert RGBA → codec pixel format (SpoutDX ReceiveImage with bRGB=false outputs RGBA)
-    const uint8_t* in_data[1]  = { frame.data.data() };
-    int            in_stride[1] = { static_cast<int>(frame.width) * 4 };
+    // ピクセル内容が変化している場合のみ RGBA→YUV 変換 (sws_scale) を実行する。
+    //
+    // 静止画面のフリーズフレーム再送時は同一の RGBA データを設定 fps で繰り返し
+    // エンコードするが、変換結果も毎回同一になる。sws_scale は解像度に比例した
+    // CPU コストがかかるため、直前の変換済み YUV フレームをそのまま再利用する
+    // ことで変換コストを排除しつつエンコーダーへは新しい PTS でフレームを送り続ける。
+    if (content_changed || impl_->frame_count == 0) {
+        // Convert RGBA → codec pixel format (SpoutDX ReceiveImage with bRGB=false outputs RGBA)
+        const uint8_t* in_data[1]  = { frame.data.data() };
+        int            in_stride[1] = { static_cast<int>(frame.width) * 4 };
 
-    int make_writable_ret = av_frame_make_writable(impl_->yuv_frame);
-    if (make_writable_ret < 0) return false;
-    sws_scale(impl_->sws_ctx,
-              in_data, in_stride, 0, static_cast<int>(frame.height),
-              impl_->yuv_frame->data, impl_->yuv_frame->linesize);
+        int make_writable_ret = av_frame_make_writable(impl_->yuv_frame);
+        if (make_writable_ret < 0) return false;
+        sws_scale(impl_->sws_ctx,
+                  in_data, in_stride, 0, static_cast<int>(frame.height),
+                  impl_->yuv_frame->data, impl_->yuv_frame->linesize);
+    }
 
     impl_->yuv_frame->pts = impl_->frame_count++;
 

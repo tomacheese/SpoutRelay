@@ -169,6 +169,13 @@ void Supervisor::handle_connecting_output() {
         return;
     }
 
+    // 最初のフレームをエンコードスレッドの初期フリーズフレームとして保存する。
+    // Spout 送信側が静止画面のまま SendImage() を止めると FramePump はフレームを
+    // キューに積まない。encode_publish_thread_func() がこの保存フレームで起動
+    // することで、送信側が静止していても直ちに映像を送れるようになる。
+    initial_frame_buf_  = buf;
+    initial_frame_meta_ = meta;
+
     current_width_  = meta.width;
     current_height_ = meta.height;
 
@@ -249,13 +256,18 @@ void Supervisor::handle_streaming() {
         return;
     }
 
-    // Frame stall check
-    int64_t elapsed = time_utils::now_ms() - last_frame_time_ms_.load();
-    if (elapsed > config_.spout.frame_timeout_ms) {
-        log_->log_event(spdlog::level::warn, "frame_stall_detected", {});
-        stall_timer_.reset();
-        state_machine_.transition_to(PublisherState::STALLED);
-        return;
+    // Spout ソース切断検出。
+    // 静止画面では新規フレームが来ないが ReceiveImage 自体は成功するため
+    // last_source_alive_ms() は更新される。新規フレームが来ない（静止）だけでは
+    // STALLED に遷移せず、ソースが完全に応答しなくなった場合のみ遷移する。
+    if (frame_pump_) {
+        int64_t elapsed = time_utils::now_ms() - frame_pump_->last_source_alive_ms();
+        if (elapsed > config_.spout.frame_timeout_ms) {
+            log_->log_event(spdlog::level::warn, "source_disconnected_detected", {});
+            stall_timer_.reset();
+            state_machine_.transition_to(PublisherState::STALLED);
+            return;
+        }
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -269,12 +281,14 @@ void Supervisor::handle_stalled() {
         return;
     }
 
-    // Recovery: encode thread received a new frame
-    int64_t elapsed = time_utils::now_ms() - last_frame_time_ms_.load();
-    if (elapsed < config_.spout.frame_timeout_ms) {
-        log_->log_event(spdlog::level::info, "stall_recovered", {});
-        state_machine_.transition_to(PublisherState::STREAMING);
-        return;
+    // ソースが復帰した場合は STREAMING に戻る
+    if (frame_pump_) {
+        int64_t elapsed = time_utils::now_ms() - frame_pump_->last_source_alive_ms();
+        if (elapsed < config_.spout.frame_timeout_ms) {
+            log_->log_event(spdlog::level::info, "stall_recovered", {});
+            state_machine_.transition_to(PublisherState::STREAMING);
+            return;
+        }
     }
 
     // Error flags from encode thread
@@ -450,40 +464,116 @@ void Supervisor::encode_publish_thread_func() {
     uint64_t bytes_since_last  = 0;
     uint64_t frames_since_last = 0;
 
+    // 静止画面フリーズフレームキャッシュ。
+    // Spout は画面に変化がない場合新規フレームを送らないため、最後に受信した
+    // フレームを設定 fps で繰り返しエンコードして RTSP ストリームを維持する。
+    //
+    // handle_connecting_output() が取得した最初のフレームで初期化することで、
+    // 送信側が接続直後から静止状態（SendImage を止めている）でも直ちに映像を
+    // 送れるようになる（ScreenRelay PR #6 と同じ修正）。
+    FrameBuffer freeze_buf  = std::move(initial_frame_buf_);
+    FrameMeta   freeze_meta = initial_frame_meta_;
+    bool        has_freeze  = !freeze_buf.data.empty();
+    initial_frame_meta_ = {};  // メモリ解放（コピー済み）
+    bool        content_changed = true;  // sws_scale スキップ判定用
+
+    // 設定 fps に基づくフレーム送信間隔
+    const int64_t frame_interval_us = 1'000'000LL / config_.encoder.fps;
+    time_utils::Stopwatch frame_sw;
+
     while (!encode_stop_.load()) {
+        // 次のフレーム送信期限までの残り待機時間を計算する
+        int64_t wait_us = frame_interval_us - frame_sw.elapsed_us();
+        int wait_ms = (wait_us > 0)
+            ? std::min(static_cast<int>(wait_us / 1000) + 1,
+                       config_.spout.poll_interval_ms * 2)
+            : 0;
+
         FrameBuffer buf;
         FrameMeta   meta;
+        bool got_frame = (wait_ms > 0)
+            ? frame_pump_->wait_pop(buf, meta, wait_ms)
+            : frame_pump_->try_pop(buf, meta);
 
-        if (!frame_pump_->wait_pop(buf, meta, config_.spout.poll_interval_ms * 2)) {
+        if (got_frame) {
+            // 新規フレームを受信: フリーズバッファを更新する
+            freeze_buf      = std::move(buf);
+            freeze_meta     = meta;
+            has_freeze      = true;
+            content_changed = true;
+            last_frame_time_ms_.store(time_utils::now_ms());
+            metrics_->increment_frames_received();
+            log_->log_frame_received(meta.sequence, meta.width, meta.height);
+
+            // 解像度変更
+            if (freeze_meta.width != current_width_ || freeze_meta.height != current_height_) {
+                pending_width_.store(freeze_meta.width);
+                pending_height_.store(freeze_meta.height);
+                // 新解像度フレームをスレッド再起動時の初期フリーズフレームとして保存する。
+                // handle_reconfiguring() がエンコーダーを新解像度で再初期化した後、
+                // 次のエンコードスレッドが has_freeze=true で起動できるようにする。
+                initial_frame_buf_  = freeze_buf;
+                initial_frame_meta_ = freeze_meta;
+                resolution_changed_flag_.store(true);
+                return;
+            }
+        }
+
+        // 送信間隔に達していなければスキップ（新規フレーム受信時も同様）
+        if (frame_sw.elapsed_us() < frame_interval_us) {
             continue;
         }
 
-        last_frame_time_ms_.store(time_utils::now_ms());
-        metrics_->increment_frames_received();
-        log_->log_frame_received(meta.sequence, meta.width, meta.height);
-
-        // Resolution change
-        if (meta.width != current_width_ || meta.height != current_height_) {
-            pending_width_.store(meta.width);
-            pending_height_.store(meta.height);
-            resolution_changed_flag_.store(true);
-            return;
+        // 最初のフレームがまだ来ていない
+        if (!has_freeze) {
+            continue;
         }
 
-        // Encode
+        // ソース切断中はフリーズフレーム送信を抑止する。
+        // STALLED 状態でもエンコードスレッドは動作し続けるが、ソースが
+        // frame_timeout_ms 以上応答していない間はエンコード/送信を止めることで
+        // 無用な CPU・帯域消費を防ぐ。RTSP クライアントにも切断状態が伝わる。
+        // ソースが復帰した瞬間（last_source_alive_ms が更新される）に自動再開する。
+        if (frame_pump_) {
+            int64_t source_age_ms = time_utils::now_ms() - frame_pump_->last_source_alive_ms();
+            if (source_age_ms > static_cast<int64_t>(config_.spout.frame_timeout_ms)) {
+                frame_sw.reset();  // 復帰直後に即送信できるようタイマーをリセット
+                continue;
+            }
+        }
+
+        // フレームタイマーをリセットし、タイムスタンプを現在時刻に統一する
+        frame_sw.reset();
+        freeze_meta.timestamp_us = time_utils::now_us();
+
+        // エンコード。content_changed が false の場合 sws_scale をスキップし
+        // 直前の変換済み YUV フレームを再利用する（静止画面での CPU 負荷削減）
         std::vector<EncodedPacket> packets;
-        if (!encoder_->encode(buf, meta, packets)) {
+        if (!encoder_->encode(freeze_buf, freeze_meta, packets, content_changed)) {
             log_->log_error("ENCODER_ENCODE_FAILED", "encode() returned false");
             metrics_->increment_frames_dropped();
+            // フリーズフレームを保存する。エラー後に PROBING→CONNECTING_OUTPUT と
+            // 遷移するため実際には handle_connecting_output() が上書きするが、
+            // 保存しておくことで再接続時の初期フレームとして使われうる。
+            initial_frame_buf_  = freeze_buf;
+            initial_frame_meta_ = freeze_meta;
             encode_error_flag_.store(true);
             return;
         }
+        // YUV フレームは消費済み。次に新規フレームを受信するまで再変換不要
+        content_changed = false;
 
         // Publish
         for (auto& pkt : packets) {
             if (!rtsp_client_->send_packet(pkt)) {
                 log_->log_error("RTSP_SEND_FAILED", "send_packet failed");
                 metrics_->increment_rtsp_errors();
+                // RTSP 再接続後は handle_reconnecting_output() がエンコードスレッドを
+                // 再起動するだけで handle_connecting_output() は通らない。
+                // フリーズフレームを保存しておくことで、再接続直後の
+                // has_freeze=true 起動を保証する（静止画面の黒画面防止）。
+                initial_frame_buf_  = freeze_buf;
+                initial_frame_meta_ = freeze_meta;
                 rtsp_error_flag_.store(true);
                 return;
             }

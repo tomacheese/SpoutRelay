@@ -170,6 +170,11 @@ add_executable(spout_test_sender tests/spout_test_sender/main.cpp)
 target_include_directories(spout_test_sender PRIVATE ${SPOUT2_DX_DIR} ${SPOUT2_GL_DIR})
 target_link_libraries(spout_test_sender PRIVATE spout2_static)
 
+# Static freeze-frame sender (tests that SpoutRelay keeps streaming when sender stops updating)
+add_executable(spout_static_sender tests/spout_static_sender/main.cpp)
+target_include_directories(spout_static_sender PRIVATE ${SPOUT2_DX_DIR} ${SPOUT2_GL_DIR})
+target_link_libraries(spout_static_sender PRIVATE spout2_static)
+
 if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
