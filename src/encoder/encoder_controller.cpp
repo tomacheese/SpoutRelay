@@ -231,17 +231,11 @@ bool EncoderController::encode(const FrameBuffer& frame,
                   impl_->yuv_frame->data, impl_->yuv_frame->linesize);
     }
 
-    // RTP タイムスタンプ 32-bit オーバーフロー防止。
-    // RTP_ts = pts * 90000 / fps であり、pts が 0xFFFFFFFF * fps / 90000 に
-    // 達すると uint32_t をオーバーフローする (60fps で約 13.3 時間)。
-    // オーバーフロー直前で frame_count をリセットする (RFC 3550 準拠クライアントは
-    // タイムスタンプのラップアラウンドを処理できる)。
-    constexpr int64_t kRtpClock  = 90000LL;
-    const     int64_t kPtsWrapAt =
-        static_cast<int64_t>(0xFFFFFFFFLL) * config_.fps / kRtpClock;
-    if (impl_->frame_count >= kPtsWrapAt) {
-        impl_->frame_count = 0;
-    }
+    // PTS は単調増加フレームカウンタ。
+    // FFmpeg の RTSP/RTP muxer は内部で RTP タイムスタンプを uint32_t に
+    // 自然切り捨てするため、32-bit オーバーフローは muxer 側で自動処理される。
+    // 手動で frame_count を 0 にリセットすると NVENC が単調増加制約違反で
+    // ENCODER_ENCODE_FAILED を返すため、リセットは行わない。
     impl_->yuv_frame->pts = impl_->frame_count++;
 
     // IDR 強制フラグが立っている場合はキーフレームを要求し、フラグを消費する。
