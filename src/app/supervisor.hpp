@@ -70,4 +70,11 @@ private:
     uint32_t current_width_  = 0;
     uint32_t current_height_ = 0;
     int reconnect_attempts_  = 0;
+
+    /// @brief handle_connecting_output() で取得した最初のフレーム。
+    ///        encode_publish_thread_func() の初期フリーズフレームとして渡すことで、
+    ///        Spout 送信側が静止画面のまま SendImage() を止めている場合でも
+    ///        ストリームに映像が届くようにする。使用後は解放してメモリを節約する。
+    FrameBuffer initial_frame_buf_;
+    FrameMeta   initial_frame_meta_{};
 };

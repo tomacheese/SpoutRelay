@@ -169,6 +169,13 @@ void Supervisor::handle_connecting_output() {
         return;
     }
 
+    // 最初のフレームをエンコードスレッドの初期フリーズフレームとして保存する。
+    // Spout 送信側が静止画面のまま SendImage() を止めると FramePump はフレームを
+    // キューに積まない。encode_publish_thread_func() がこの保存フレームで起動
+    // することで、送信側が静止していても直ちに映像を送れるようになる。
+    initial_frame_buf_  = buf;
+    initial_frame_meta_ = meta;
+
     current_width_  = meta.width;
     current_height_ = meta.height;
 
@@ -460,9 +467,14 @@ void Supervisor::encode_publish_thread_func() {
     // 静止画面フリーズフレームキャッシュ。
     // Spout は画面に変化がない場合新規フレームを送らないため、最後に受信した
     // フレームを設定 fps で繰り返しエンコードして RTSP ストリームを維持する。
-    FrameBuffer freeze_buf;
-    FrameMeta   freeze_meta{};
-    bool        has_freeze     = false;
+    //
+    // handle_connecting_output() が取得した最初のフレームで初期化することで、
+    // 送信側が接続直後から静止状態（SendImage を止めている）でも直ちに映像を
+    // 送れるようになる（ScreenRelay PR #6 と同じ修正）。
+    FrameBuffer freeze_buf  = std::move(initial_frame_buf_);
+    FrameMeta   freeze_meta = initial_frame_meta_;
+    bool        has_freeze  = !freeze_buf.data.empty();
+    initial_frame_meta_ = {};  // メモリ解放（コピー済み）
     bool        content_changed = true;  // sws_scale スキップ判定用
 
     // 設定 fps に基づくフレーム送信間隔
