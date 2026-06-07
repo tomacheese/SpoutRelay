@@ -529,6 +529,19 @@ void Supervisor::encode_publish_thread_func() {
             continue;
         }
 
+        // ソース切断中はフリーズフレーム送信を抑止する。
+        // STALLED 状態でもエンコードスレッドは動作し続けるが、ソースが
+        // frame_timeout_ms 以上応答していない間はエンコード/送信を止めることで
+        // 無用な CPU・帯域消費を防ぐ。RTSP クライアントにも切断状態が伝わる。
+        // ソースが復帰した瞬間（last_source_alive_ms が更新される）に自動再開する。
+        if (frame_pump_) {
+            int64_t source_age_ms = time_utils::now_ms() - frame_pump_->last_source_alive_ms();
+            if (source_age_ms > static_cast<int64_t>(config_.spout.frame_timeout_ms)) {
+                frame_sw.reset();  // 復帰直後に即送信できるようタイマーをリセット
+                continue;
+            }
+        }
+
         // フレームタイマーをリセットし、タイムスタンプを現在時刻に統一する
         frame_sw.reset();
         freeze_meta.timestamp_us = time_utils::now_us();
