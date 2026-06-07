@@ -10,6 +10,8 @@ void FramePump::start(std::shared_ptr<ISpoutMonitor> monitor, int poll_interval_
     if (running_.load()) stop();
     monitor_          = std::move(monitor);
     poll_interval_ms_ = poll_interval_ms;
+    // 起動直後にスタール判定が誤発動しないよう現在時刻で初期化する
+    last_source_alive_ms_.store(time_utils::now_ms());
     running_.store(true);
     thread_ = std::thread(&FramePump::capture_thread_func, this);
 }
@@ -57,14 +59,19 @@ void FramePump::capture_thread_func() {
         bool is_new = false;
         bool ok     = monitor_->receive_latest_frame(buf, meta, is_new);
 
-        if (ok && is_new) {
-            last_frame_time_ms_.store(time_utils::now_ms());
-            std::lock_guard<std::mutex> lk(mutex_);
-            if (static_cast<int>(queue_.size()) >= MAX_QUEUE_SIZE) {
-                queue_.pop(); // drop oldest frame to prevent lag
+        if (ok) {
+            // ソースが応答している（静止画面・新規フレーム問わず）→ 生存時刻を更新
+            last_source_alive_ms_.store(time_utils::now_ms());
+
+            if (is_new) {
+                last_frame_time_ms_.store(time_utils::now_ms());
+                std::lock_guard<std::mutex> lk(mutex_);
+                if (static_cast<int>(queue_.size()) >= MAX_QUEUE_SIZE) {
+                    queue_.pop(); // drop oldest frame to prevent lag
+                }
+                queue_.emplace(std::move(buf), std::move(meta));
+                cv_.notify_one();
             }
-            queue_.emplace(std::move(buf), std::move(meta));
-            cv_.notify_one();
         }
 
         std::this_thread::sleep_for(

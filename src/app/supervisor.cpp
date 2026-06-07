@@ -249,13 +249,18 @@ void Supervisor::handle_streaming() {
         return;
     }
 
-    // Frame stall check
-    int64_t elapsed = time_utils::now_ms() - last_frame_time_ms_.load();
-    if (elapsed > config_.spout.frame_timeout_ms) {
-        log_->log_event(spdlog::level::warn, "frame_stall_detected", {});
-        stall_timer_.reset();
-        state_machine_.transition_to(PublisherState::STALLED);
-        return;
+    // Spout ソース切断検出。
+    // 静止画面では新規フレームが来ないが ReceiveImage 自体は成功するため
+    // last_source_alive_ms() は更新される。新規フレームが来ない（静止）だけでは
+    // STALLED に遷移せず、ソースが完全に応答しなくなった場合のみ遷移する。
+    if (frame_pump_) {
+        int64_t elapsed = time_utils::now_ms() - frame_pump_->last_source_alive_ms();
+        if (elapsed > config_.spout.frame_timeout_ms) {
+            log_->log_event(spdlog::level::warn, "source_disconnected_detected", {});
+            stall_timer_.reset();
+            state_machine_.transition_to(PublisherState::STALLED);
+            return;
+        }
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -269,12 +274,14 @@ void Supervisor::handle_stalled() {
         return;
     }
 
-    // Recovery: encode thread received a new frame
-    int64_t elapsed = time_utils::now_ms() - last_frame_time_ms_.load();
-    if (elapsed < config_.spout.frame_timeout_ms) {
-        log_->log_event(spdlog::level::info, "stall_recovered", {});
-        state_machine_.transition_to(PublisherState::STREAMING);
-        return;
+    // ソースが復帰した場合は STREAMING に戻る
+    if (frame_pump_) {
+        int64_t elapsed = time_utils::now_ms() - frame_pump_->last_source_alive_ms();
+        if (elapsed < config_.spout.frame_timeout_ms) {
+            log_->log_event(spdlog::level::info, "stall_recovered", {});
+            state_machine_.transition_to(PublisherState::STREAMING);
+            return;
+        }
     }
 
     // Error flags from encode thread
@@ -450,34 +457,76 @@ void Supervisor::encode_publish_thread_func() {
     uint64_t bytes_since_last  = 0;
     uint64_t frames_since_last = 0;
 
+    // 静止画面フリーズフレームキャッシュ。
+    // Spout は画面に変化がない場合新規フレームを送らないため、最後に受信した
+    // フレームを設定 fps で繰り返しエンコードして RTSP ストリームを維持する。
+    FrameBuffer freeze_buf;
+    FrameMeta   freeze_meta{};
+    bool        has_freeze     = false;
+    bool        content_changed = true;  // sws_scale スキップ判定用
+
+    // 設定 fps に基づくフレーム送信間隔
+    const int64_t frame_interval_us = 1'000'000LL / config_.encoder.fps;
+    time_utils::Stopwatch frame_sw;
+
     while (!encode_stop_.load()) {
+        // 次のフレーム送信期限までの残り待機時間を計算する
+        int64_t wait_us = frame_interval_us - frame_sw.elapsed_us();
+        int wait_ms = (wait_us > 0)
+            ? std::min(static_cast<int>(wait_us / 1000) + 1,
+                       config_.spout.poll_interval_ms * 2)
+            : 0;
+
         FrameBuffer buf;
         FrameMeta   meta;
+        bool got_frame = (wait_ms > 0)
+            ? frame_pump_->wait_pop(buf, meta, wait_ms)
+            : frame_pump_->try_pop(buf, meta);
 
-        if (!frame_pump_->wait_pop(buf, meta, config_.spout.poll_interval_ms * 2)) {
+        if (got_frame) {
+            // 新規フレームを受信: フリーズバッファを更新する
+            freeze_buf      = std::move(buf);
+            freeze_meta     = meta;
+            has_freeze      = true;
+            content_changed = true;
+            last_frame_time_ms_.store(time_utils::now_ms());
+            metrics_->increment_frames_received();
+            log_->log_frame_received(meta.sequence, meta.width, meta.height);
+
+            // 解像度変更
+            if (freeze_meta.width != current_width_ || freeze_meta.height != current_height_) {
+                pending_width_.store(freeze_meta.width);
+                pending_height_.store(freeze_meta.height);
+                resolution_changed_flag_.store(true);
+                return;
+            }
+        }
+
+        // 送信間隔に達していなければスキップ（新規フレーム受信時も同様）
+        if (frame_sw.elapsed_us() < frame_interval_us) {
             continue;
         }
 
-        last_frame_time_ms_.store(time_utils::now_ms());
-        metrics_->increment_frames_received();
-        log_->log_frame_received(meta.sequence, meta.width, meta.height);
-
-        // Resolution change
-        if (meta.width != current_width_ || meta.height != current_height_) {
-            pending_width_.store(meta.width);
-            pending_height_.store(meta.height);
-            resolution_changed_flag_.store(true);
-            return;
+        // 最初のフレームがまだ来ていない
+        if (!has_freeze) {
+            continue;
         }
 
-        // Encode
+        // フレームタイマーをリセットし、タイムスタンプを現在時刻に統一する
+        frame_sw.reset();
+        freeze_meta.timestamp_us = time_utils::now_us();
+
+        // エンコード。content_changed が false の場合 sws_scale をスキップし
+        // 直前の変換済み YUV フレームを再利用する（静止画面での CPU 負荷削減）
         std::vector<EncodedPacket> packets;
-        if (!encoder_->encode(buf, meta, packets)) {
+        if (!encoder_->encode(freeze_buf, freeze_meta, packets, content_changed)) {
             log_->log_error("ENCODER_ENCODE_FAILED", "encode() returned false");
             metrics_->increment_frames_dropped();
             encode_error_flag_.store(true);
             return;
         }
+        // YUV フレームは消費済み。次に新規フレームを受信するまで再変換不要
+        content_changed = false;
 
         // Publish
         for (auto& pkt : packets) {
