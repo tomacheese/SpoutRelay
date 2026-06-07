@@ -28,9 +28,16 @@ public:
               uint32_t width, uint32_t height,
               std::string& error);
 
+    /**
+     * @param content_changed 直前の encode() 呼び出しからピクセル内容が変化している場合は true。
+     *                        false を渡すと RGBA→YUV の sws_scale 変換を省略し、
+     *                        直前の変換済み YUV フレームを再利用する。
+     *                        静止画面のフリーズフレーム再送時に CPU 負荷を大幅に削減できる。
+     */
     bool encode(const FrameBuffer& frame,
                 const FrameMeta& meta,
-                std::vector<EncodedPacket>& out_packets);
+                std::vector<EncodedPacket>& out_packets,
+                bool content_changed = true);
 
     bool flush(std::vector<EncodedPacket>& out_packets);
 
