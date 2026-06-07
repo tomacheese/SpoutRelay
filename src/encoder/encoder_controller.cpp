@@ -19,6 +19,8 @@ struct EncoderController::Impl {
     AVPacket*        pkt        = nullptr;
     int64_t          frame_count = 0;
     std::string      codec_name;
+
+    bool             force_next_idr = false;  ///< 次フレームを IDR として強制出力するフラグ
 };
 
 EncoderController::EncoderController()
@@ -229,7 +231,24 @@ bool EncoderController::encode(const FrameBuffer& frame,
                   impl_->yuv_frame->data, impl_->yuv_frame->linesize);
     }
 
+    // RTP タイムスタンプ 32-bit オーバーフロー防止。
+    // RTP_ts = pts * 90000 / fps であり、pts が 0xFFFFFFFF * fps / 90000 に
+    // 達すると uint32_t をオーバーフローする (60fps で約 13.3 時間)。
+    // オーバーフロー直前で frame_count をリセットする (RFC 3550 準拠クライアントは
+    // タイムスタンプのラップアラウンドを処理できる)。
+    constexpr int64_t kRtpClock  = 90000LL;
+    const     int64_t kPtsWrapAt =
+        static_cast<int64_t>(0xFFFFFFFFLL) * config_.fps / kRtpClock;
+    if (impl_->frame_count >= kPtsWrapAt) {
+        impl_->frame_count = 0;
+    }
     impl_->yuv_frame->pts = impl_->frame_count++;
+
+    // IDR 強制フラグが立っている場合はキーフレームを要求し、フラグを消費する。
+    // RTSP 再接続後に即座に完全フレームが届くようにするため。
+    impl_->yuv_frame->pict_type = impl_->force_next_idr
+        ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
+    impl_->force_next_idr = false;
 
     int ret = avcodec_send_frame(impl_->codec_ctx, impl_->yuv_frame);
     if (ret < 0) return false;
@@ -249,11 +268,16 @@ void EncoderController::reset() {
     if (impl_->yuv_frame) { av_frame_free(&impl_->yuv_frame); }
     if (impl_->sws_ctx)   { sws_freeContext(impl_->sws_ctx); impl_->sws_ctx = nullptr; }
     if (impl_->codec_ctx) { avcodec_free_context(&impl_->codec_ctx); }
-    impl_->frame_count = 0;
-    impl_->codec       = nullptr;
+    impl_->frame_count   = 0;
+    impl_->force_next_idr = false;
+    impl_->codec          = nullptr;
     impl_->codec_name.clear();
     width_  = 0;
     height_ = 0;
+}
+
+void EncoderController::request_next_idr() {
+    impl_->force_next_idr = true;
 }
 
 int EncoderController::fps() const {

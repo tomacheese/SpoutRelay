@@ -421,6 +421,10 @@ void Supervisor::handle_reconnecting_output() {
     rtsp_backoff_.reset(config_.rtsp.reconnect_delay_ms);
     reconnect_attempts_ = 0;
     last_frame_time_ms_.store(time_utils::now_ms());
+    // 再接続直後の最初のフレームを IDR として送出する。
+    // エンコーダーをリセットせず GOP 内に挿入するため PTS の連続性は保たれる。
+    // これにより接続直後から受信側が黒画面なく映像を表示できる。
+    if (encoder_) encoder_->request_next_idr();
     start_encode_thread();
     state_machine_.transition_to(PublisherState::STREAMING);
 }
@@ -596,6 +600,16 @@ void Supervisor::encode_publish_thread_func() {
                 metrics_sw.reset();
             }
         }
+    }
+
+    // STALLED → RECONNECTING_OUTPUT のように外部から stop_encode_thread() で
+    // ループを抜けた場合、initial_frame_buf_ は起動時に std::move 済みで空のため、
+    // 次回 start_encode_thread() が has_freeze=false で起動し黒画面になる。
+    // ループ終了時に最後のフリーズフレームを保存し、再起動時に即送信できるようにする。
+    // (解像度変更・encode エラー・RTSP エラーの早期 return パスは既に保存済み)
+    if (has_freeze) {
+        initial_frame_buf_  = std::move(freeze_buf);
+        initial_frame_meta_ = freeze_meta;
     }
 }
 
