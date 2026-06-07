@@ -509,6 +509,11 @@ void Supervisor::encode_publish_thread_func() {
             if (freeze_meta.width != current_width_ || freeze_meta.height != current_height_) {
                 pending_width_.store(freeze_meta.width);
                 pending_height_.store(freeze_meta.height);
+                // 新解像度フレームをスレッド再起動時の初期フリーズフレームとして保存する。
+                // handle_reconfiguring() がエンコーダーを新解像度で再初期化した後、
+                // 次のエンコードスレッドが has_freeze=true で起動できるようにする。
+                initial_frame_buf_  = freeze_buf;
+                initial_frame_meta_ = freeze_meta;
                 resolution_changed_flag_.store(true);
                 return;
             }
@@ -534,6 +539,11 @@ void Supervisor::encode_publish_thread_func() {
         if (!encoder_->encode(freeze_buf, freeze_meta, packets, content_changed)) {
             log_->log_error("ENCODER_ENCODE_FAILED", "encode() returned false");
             metrics_->increment_frames_dropped();
+            // フリーズフレームを保存する。エラー後に PROBING→CONNECTING_OUTPUT と
+            // 遷移するため実際には handle_connecting_output() が上書きするが、
+            // 保存しておくことで再接続時の初期フレームとして使われうる。
+            initial_frame_buf_  = freeze_buf;
+            initial_frame_meta_ = freeze_meta;
             encode_error_flag_.store(true);
             return;
         }
@@ -545,6 +555,12 @@ void Supervisor::encode_publish_thread_func() {
             if (!rtsp_client_->send_packet(pkt)) {
                 log_->log_error("RTSP_SEND_FAILED", "send_packet failed");
                 metrics_->increment_rtsp_errors();
+                // RTSP 再接続後は handle_reconnecting_output() がエンコードスレッドを
+                // 再起動するだけで handle_connecting_output() は通らない。
+                // フリーズフレームを保存しておくことで、再接続直後の
+                // has_freeze=true 起動を保証する（静止画面の黒画面防止）。
+                initial_frame_buf_  = freeze_buf;
+                initial_frame_meta_ = freeze_meta;
                 rtsp_error_flag_.store(true);
                 return;
             }
