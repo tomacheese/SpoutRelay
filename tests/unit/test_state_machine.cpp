@@ -120,5 +120,31 @@ int run_state_machine_tests() {
         printf("[PASS] RECONNECTING_OUTPUT → FATAL\n");
     }
 
+    {
+        // CONNECTING_OUTPUT → FATAL (エンコーダー初期化が全コーデックで失敗した場合)
+        StateMachine sm;
+        sm.transition_to(PublisherState::IDLE);
+        sm.transition_to(PublisherState::PROBING);
+        sm.transition_to(PublisherState::CONNECTING_OUTPUT);
+        bool ok = sm.transition_to(PublisherState::FATAL);
+        VERIFY_MSG(ok, "CONNECTING_OUTPUT → FATAL should succeed");
+        VERIFY(sm.current_state() == PublisherState::FATAL);
+        printf("[PASS] CONNECTING_OUTPUT → FATAL\n");
+    }
+
+    {
+        // RECONFIGURING → FATAL (解像度変更後のエンコーダー再初期化が失敗した場合)
+        StateMachine sm;
+        sm.transition_to(PublisherState::IDLE);
+        sm.transition_to(PublisherState::PROBING);
+        sm.transition_to(PublisherState::CONNECTING_OUTPUT);
+        sm.transition_to(PublisherState::STREAMING);
+        sm.transition_to(PublisherState::RECONFIGURING);
+        bool ok = sm.transition_to(PublisherState::FATAL);
+        VERIFY_MSG(ok, "RECONFIGURING → FATAL should succeed");
+        VERIFY(sm.current_state() == PublisherState::FATAL);
+        printf("[PASS] RECONFIGURING → FATAL\n");
+    }
+
     return 0;
 }
