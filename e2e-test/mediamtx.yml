@@ -1,0 +1,20 @@
+# SpoutRelay E2E テスト用 mediamtx 設定
+# 全パスへの RTSP publish/read を許可する最小設定
+
+# RTSP サーバー設定
+rtspAddress: :8554
+
+# 認証なし（テスト用）
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+
+# 全パスを許可
+paths:
+  all_others:

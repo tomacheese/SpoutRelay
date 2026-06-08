@@ -3,6 +3,7 @@ config/config.json
 
 # Build artifacts and CMake FetchContent cache
 build/
+build-*/
 
 # Runtime state
 state/

@@ -173,7 +173,7 @@ void Supervisor::handle_connecting_output() {
     // Spout 送信側が静止画面のまま SendImage() を止めると FramePump はフレームを
     // キューに積まない。encode_publish_thread_func() がこの保存フレームで起動
     // することで、送信側が静止していても直ちに映像を送れるようになる。
-    initial_frame_buf_  = buf;
+    initial_frame_buf_  = std::move(buf);
     initial_frame_meta_ = meta;
 
     current_width_  = meta.width;
@@ -421,6 +421,10 @@ void Supervisor::handle_reconnecting_output() {
     rtsp_backoff_.reset(config_.rtsp.reconnect_delay_ms);
     reconnect_attempts_ = 0;
     last_frame_time_ms_.store(time_utils::now_ms());
+    // 再接続直後の最初のフレームを IDR として送出する。
+    // エンコーダーをリセットせず GOP 内に挿入するため PTS の連続性は保たれる。
+    // これにより接続直後から受信側が黒画面なく映像を表示できる。
+    if (encoder_) encoder_->request_next_idr();
     start_encode_thread();
     state_machine_.transition_to(PublisherState::STREAMING);
 }
@@ -512,7 +516,7 @@ void Supervisor::encode_publish_thread_func() {
                 // 新解像度フレームをスレッド再起動時の初期フリーズフレームとして保存する。
                 // handle_reconfiguring() がエンコーダーを新解像度で再初期化した後、
                 // 次のエンコードスレッドが has_freeze=true で起動できるようにする。
-                initial_frame_buf_  = freeze_buf;
+                initial_frame_buf_  = std::move(freeze_buf);
                 initial_frame_meta_ = freeze_meta;
                 resolution_changed_flag_.store(true);
                 return;
@@ -555,7 +559,7 @@ void Supervisor::encode_publish_thread_func() {
             // フリーズフレームを保存する。エラー後に PROBING→CONNECTING_OUTPUT と
             // 遷移するため実際には handle_connecting_output() が上書きするが、
             // 保存しておくことで再接続時の初期フレームとして使われうる。
-            initial_frame_buf_  = freeze_buf;
+            initial_frame_buf_  = std::move(freeze_buf);
             initial_frame_meta_ = freeze_meta;
             encode_error_flag_.store(true);
             return;
@@ -572,7 +576,7 @@ void Supervisor::encode_publish_thread_func() {
                 // 再起動するだけで handle_connecting_output() は通らない。
                 // フリーズフレームを保存しておくことで、再接続直後の
                 // has_freeze=true 起動を保証する（静止画面の黒画面防止）。
-                initial_frame_buf_  = freeze_buf;
+                initial_frame_buf_  = std::move(freeze_buf);
                 initial_frame_meta_ = freeze_meta;
                 rtsp_error_flag_.store(true);
                 return;
@@ -596,6 +600,16 @@ void Supervisor::encode_publish_thread_func() {
                 metrics_sw.reset();
             }
         }
+    }
+
+    // STALLED → RECONNECTING_OUTPUT のように外部から stop_encode_thread() で
+    // ループを抜けた場合、initial_frame_buf_ は起動時に std::move 済みで空のため、
+    // 次回 start_encode_thread() が has_freeze=false で起動し黒画面になる。
+    // ループ終了時に最後のフリーズフレームを保存し、再起動時に即送信できるようにする。
+    // (解像度変更・encode エラー・RTSP エラーの早期 return パスは既に保存済み)
+    if (has_freeze) {
+        initial_frame_buf_  = std::move(freeze_buf);
+        initial_frame_meta_ = freeze_meta;
     }
 }
 

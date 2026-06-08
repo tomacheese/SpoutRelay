@@ -1,6 +1,6 @@
 {
   "app": {
-    "instance_name": "spoutrelay-test",
+    "instance_name": "spoutrelay-e2e-test",
     "log_dir": "./logs",
     "metrics_path": "./state/metrics.json",
     "health_path": "./state/health.json"
@@ -24,17 +24,17 @@
     "threads": 0
   },
   "rtsp": {
-    "url": "rtsp://127.0.0.1:8554/spout-test",
+    "url": "rtsp://127.0.0.1:8554/spout-e2e",
     "connect_timeout_ms": 5000,
     "send_timeout_ms": 5000,
-    "max_reconnect_attempts": 5,
+    "max_reconnect_attempts": 10,
     "reconnect_delay_ms": 1000,
-    "reconnect_max_delay_ms": 30000,
+    "reconnect_max_delay_ms": 10000,
     "reconnect_backoff_multiplier": 2.0
   },
   "runtime": {
-    "shutdown_grace_ms": 3000,
-    "emit_metrics_interval_ms": 1000,
-    "emit_health_interval_ms": 1000
+    "shutdown_grace_ms": 500,
+    "emit_metrics_interval_ms": 500,
+    "emit_health_interval_ms": 500
   }
 }
