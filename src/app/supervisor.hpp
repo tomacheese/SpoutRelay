@@ -75,6 +75,14 @@ private:
     ///        encode_publish_thread_func() の初期フリーズフレームとして渡すことで、
     ///        Spout 送信側が静止画面のまま SendImage() を止めている場合でも
     ///        ストリームに映像が届くようにする。使用後は解放してメモリを節約する。
+    ///
+    /// @note スレッド安全性:
+    ///       メインスレッドはエンコードスレッド起動前 (start_encode_thread()) に書き込み、
+    ///       エンコードスレッドは起動直後に一度だけ std::move で読み出す。
+    ///       エンコードスレッドが書き戻す場合（RTSP/encode エラーの早期 return）は
+    ///       直後に rtsp_error_flag_/encode_error_flag_ をセットして return するため、
+    ///       メインスレッドは stop_encode_thread() (join) を経由してから参照する。
+    ///       このスレッド間の join による happens-before 関係により、明示的な mutex は不要。
     FrameBuffer initial_frame_buf_;
     FrameMeta   initial_frame_meta_{};
 };

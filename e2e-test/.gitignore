@@ -2,3 +2,11 @@
 capture/
 logs/
 state/
+
+# mediamtx が生成する TLS 証明書・ログ
+auto.crt
+auto.key
+mediamtx*.log
+
+# FFmpeg DLL (実行環境から取得すること)
+*.dll

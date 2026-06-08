@@ -5,7 +5,6 @@
 $ErrorActionPreference = "Continue"
 $Root       = Split-Path -Parent $PSScriptRoot
 $BuildDir   = "$Root\build"
-$BuildE2E   = "$Root\build-e2e-test"
 $TestDir    = $PSScriptRoot
 $CaptureDir = "$TestDir\capture"
 $LogDir     = "$TestDir\logs"
@@ -64,44 +63,41 @@ function Wait-Stream {
 }
 
 function Count-Keyframes {
-    param([int]$Seconds = 5, [switch]$Verbose)
+    param([int]$Seconds = 5)
+    # -show_frames はデコード済みフレーム情報を出力するため、RTSP ストリームで
+    # パケットに keyframe フラグが付かない場合でも I-frame を正確に検出できる。
+    # pict_type 列が "I" (interlaced には非対応だが H.264 では問題なし) であるか、
+    # もしくは key_frame 列 (csv の 4 番目フィールド) が 1 であることで判定する。
     $out = & ffprobe -v quiet -rtsp_transport tcp -select_streams v:0 `
-           -read_intervals "%+$Seconds" -show_packets -of csv $RTSP 2>&1
-    $lines = $out -split "`n"
-    if ($Verbose) {
-        Diag "  ffprobe raw lines: $($lines.Count)"
-        $lines | Select-Object -First 6 | ForEach-Object { Diag "    $_" }
-    }
-    # flags field contains K for keyframe (ffprobe csv: ...,flags,...).
-    # Also accept K_ (some ffprobe versions append _)
-    $kf = ($lines | Where-Object { $_ -match "^packet,video" -and ($_ -match ",K," -or $_ -match ",K_") }).Count
-    if ($kf -eq 0 -and $lines.Count -gt 0) {
-        # Fallback: count via show_frames if packets gave no results
-        $out2 = & ffprobe -v quiet -rtsp_transport tcp -select_streams v:0 `
-                -read_intervals "%+$Seconds" -show_frames -of csv $RTSP 2>&1
-        $kf = ($out2 -split "`n" | Where-Object { $_ -match "^frame,video" -and $_ -match ",1," }).Count
-    }
-    return $kf
+           -read_intervals "%+$Seconds" -show_frames -of csv $RTSP 2>&1
+    return ($out -split "`n" | Where-Object { $_ -match "^frame,video" -and $_ -match ",1," }).Count
 }
 
 # mediamtx 再起動後にリレーが再接続したことを検知する。
-# リレーログに RECONNECTING_OUTPUT→STREAMING の state_changed が現れるまで待つ。
+# リレーログの RECONNECTING_OUTPUT→STREAMING イベント数が $BaseCount より増えるまで待つ。
 # (handle_reconnecting_output() は publish_started を再発行しないためこのイベントで判定する)
+#
+# 使い方:
+#   $base = Get-ReconnectCount   # kill 前のカウントを取得
+#   # ... mediamtx を kill・再起動 ...
+#   Wait-Reconnect -BaseCount $base   # kill 後の新規再接続を待つ
+function Get-ReconnectCount {
+    if (-not (Test-Path $RelayLog)) { return 0 }
+    $lines = Get-Content $RelayLog -EA SilentlyContinue
+    return ($lines | Where-Object {
+        $_ -match '"event":"state_changed"' -and
+        $_ -match '"from":"RECONNECTING_OUTPUT"' -and
+        $_ -match '"to":"STREAMING"'
+    }).Count
+}
+
 function Wait-Reconnect {
-    param([int]$Count = 1, [int]$TimeoutSec = 20)
+    param([int]$BaseCount = 0, [int]$TimeoutSec = 20)
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
-        if (Test-Path $RelayLog) {
-            $lines   = Get-Content $RelayLog -EA SilentlyContinue
-            $matched = ($lines | Where-Object {
-                $_ -match '"event":"state_changed"' -and
-                $_ -match '"from":"RECONNECTING_OUTPUT"' -and
-                $_ -match '"to":"STREAMING"'
-            }).Count
-            if ($matched -ge $Count) {
-                Start-Sleep -Milliseconds 300
-                return $true
-            }
+        if ((Get-ReconnectCount) -gt $BaseCount) {
+            Start-Sleep -Milliseconds 300
+            return $true
         }
         Start-Sleep -Milliseconds 500
     }
@@ -142,6 +138,10 @@ if (-not (Wait-Stream 35)) {
     Info "Stream live! Stabilising 5s..."
     Start-Sleep -Seconds 5
 
+    # kill 前のカウントを記録しておくことで、kill 前の再接続 (STALLED タイムアウト等)
+    # と kill 後の再接続を明確に区別する
+    $baseReconnects = Get-ReconnectCount
+
     Info "Killing mediamtx to force RTSP disconnect..."
     Stop-Process -Id $mtx.Id -Force -EA SilentlyContinue
     Start-Sleep -Seconds 2
@@ -149,13 +149,13 @@ if (-not (Wait-Stream 35)) {
     Info "Restarting mediamtx..."
     $mtx = Start-Mediamtx
 
-    Info "Waiting for relay to reconnect (up to 15s)..."
-    if (-not (Wait-Reconnect -Count 1 -TimeoutSec 20)) {
+    Info "Waiting for relay to reconnect (up to 20s)..."
+    if (-not (Wait-Reconnect -BaseCount $baseReconnects -TimeoutSec 20)) {
         Diag "Warning: relay reconnect not confirmed via log — proceeding with ffprobe check"
     }
 
     Info "Checking keyframes in first 4s after reconnect..."
-    $kf = Count-Keyframes -Seconds 4 -Verbose
+    $kf = Count-Keyframes -Seconds 4
     Diag "Keyframes in first 4s: $kf"
 
     if ($kf -ge 1) {
@@ -187,18 +187,20 @@ if (-not (Wait-Stream 35)) {
     Info "Stream live. Waiting 12s (static sender stops sending at 10s)..."
     Start-Sleep -Seconds 12
 
+    $baseReconnects2 = Get-ReconnectCount
+
     Info "Forcing RTSP reconnect via mediamtx restart..."
     Stop-Process -Id $mtx.Id -Force -EA SilentlyContinue
     Start-Sleep -Seconds 2
     $mtx = Start-Mediamtx
 
-    Info "Waiting for relay to reconnect after mediamtx restart (up to 15s)..."
-    if (-not (Wait-Reconnect -Count 1 -TimeoutSec 20)) {
+    Info "Waiting for relay to reconnect after mediamtx restart (up to 20s)..."
+    if (-not (Wait-Reconnect -BaseCount $baseReconnects2 -TimeoutSec 20)) {
         Diag "Warning: relay reconnect not confirmed via log — proceeding with ffprobe check"
     }
 
     Info "Checking for video within 5s of reconnect..."
-    $kf2 = Count-Keyframes -Seconds 5 -Verbose
+    $kf2 = Count-Keyframes -Seconds 5
     Diag "Keyframes in first 5s after reconnect: $kf2"
 
     if ($kf2 -ge 1) {

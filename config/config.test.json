@@ -24,7 +24,7 @@
     "threads": 0
   },
   "rtsp": {
-    "url": "rtsp://192.168.0.100:8554/spout-test",
+    "url": "rtsp://127.0.0.1:8554/spout-test",
     "connect_timeout_ms": 5000,
     "send_timeout_ms": 5000,
     "max_reconnect_attempts": 5,
