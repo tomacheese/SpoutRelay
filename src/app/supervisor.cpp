@@ -173,7 +173,7 @@ void Supervisor::handle_connecting_output() {
     // Spout 送信側が静止画面のまま SendImage() を止めると FramePump はフレームを
     // キューに積まない。encode_publish_thread_func() がこの保存フレームで起動
     // することで、送信側が静止していても直ちに映像を送れるようになる。
-    initial_frame_buf_  = buf;
+    initial_frame_buf_  = std::move(buf);
     initial_frame_meta_ = meta;
 
     current_width_  = meta.width;
@@ -516,7 +516,7 @@ void Supervisor::encode_publish_thread_func() {
                 // 新解像度フレームをスレッド再起動時の初期フリーズフレームとして保存する。
                 // handle_reconfiguring() がエンコーダーを新解像度で再初期化した後、
                 // 次のエンコードスレッドが has_freeze=true で起動できるようにする。
-                initial_frame_buf_  = freeze_buf;
+                initial_frame_buf_  = std::move(freeze_buf);
                 initial_frame_meta_ = freeze_meta;
                 resolution_changed_flag_.store(true);
                 return;
@@ -559,7 +559,7 @@ void Supervisor::encode_publish_thread_func() {
             // フリーズフレームを保存する。エラー後に PROBING→CONNECTING_OUTPUT と
             // 遷移するため実際には handle_connecting_output() が上書きするが、
             // 保存しておくことで再接続時の初期フレームとして使われうる。
-            initial_frame_buf_  = freeze_buf;
+            initial_frame_buf_  = std::move(freeze_buf);
             initial_frame_meta_ = freeze_meta;
             encode_error_flag_.store(true);
             return;
@@ -576,7 +576,7 @@ void Supervisor::encode_publish_thread_func() {
                 // 再起動するだけで handle_connecting_output() は通らない。
                 // フリーズフレームを保存しておくことで、再接続直後の
                 // has_freeze=true 起動を保証する（静止画面の黒画面防止）。
-                initial_frame_buf_  = freeze_buf;
+                initial_frame_buf_  = std::move(freeze_buf);
                 initial_frame_meta_ = freeze_meta;
                 rtsp_error_flag_.store(true);
                 return;
