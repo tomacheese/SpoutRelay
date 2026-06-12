@@ -171,6 +171,21 @@ void Supervisor::handle_placeholder() {
         uint32_t h = last_source_height_ ? last_source_height_ : static_cast<uint32_t>(config_.placeholder.height);
 
         placeholder_frame_ = render_placeholder_frame(config_.placeholder, config_.spout.sender_name, w, h);
+
+        // 描画結果を検証する。
+        // render_placeholder_frame() は解像度が 0x0 や上限超過の場合に
+        // data が空・width/height = 0 の FrameBuffer を返す。
+        // メタ情報とバッファ実体が不整合なままエンコーダに渡すとクラッシュするため、
+        // 異常時は PLACEHOLDER 状態のまま次回ループでリトライする。
+        if (placeholder_frame_.data.empty() ||
+            placeholder_frame_.width != w || placeholder_frame_.height != h) {
+            log_->log_event(spdlog::level::err, "placeholder_render_failed",
+                            {{"width", std::to_string(w)}, {"height", std::to_string(h)}});
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(config_.rtsp.reconnect_delay_ms));
+            return;
+        }
+
         placeholder_meta_  = FrameMeta{};
         placeholder_meta_.width  = w;
         placeholder_meta_.height = h;

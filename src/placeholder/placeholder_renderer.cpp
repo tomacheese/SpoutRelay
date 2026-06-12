@@ -138,10 +138,22 @@ FrameBuffer render_placeholder_frame(const AppConfig::Placeholder& cfg,
     // 0x0 はクラッシュさせず空バッファを返す
     if (width == 0 || height == 0) return out;
 
-    // width*height*4 が size_t の範囲を超える場合は確保せず空バッファを返す
-    // (極端な解像度指定によるオーバーフロー/巨大確保を防ぐ)
-    constexpr uint64_t kMaxPixels = std::numeric_limits<size_t>::max() / 4;
-    if (static_cast<uint64_t>(width) * static_cast<uint64_t>(height) > kMaxPixels) {
+    // 実用最大解像度 (8192x8192) を超える場合は空バッファを返す。
+    // プレースホルダは静止画 1 枚をループ送出するため、巨大な解像度は
+    // 意図的な設定ミスや異常値とみなし bad_alloc を防ぐ。
+    constexpr uint32_t kMaxDim    = 8192u;
+    constexpr uint64_t kMaxPixels = static_cast<uint64_t>(kMaxDim) * kMaxDim;
+    if (width > kMaxDim || height > kMaxDim ||
+        static_cast<uint64_t>(width) * static_cast<uint64_t>(height) > kMaxPixels) {
+        out.width  = 0;
+        out.height = 0;
+        return out;
+    }
+
+    // width*height*4 が size_t の範囲を超える場合も空バッファを返す
+    // (size_t が 32bit 環境などでの安全策)
+    if (static_cast<uint64_t>(width) * static_cast<uint64_t>(height) >
+        std::numeric_limits<size_t>::max() / 4) {
         out.width  = 0;
         out.height = 0;
         return out;
