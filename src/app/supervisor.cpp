@@ -222,14 +222,10 @@ void Supervisor::handle_placeholder() {
 
     // 設定 fps に基づいてプレースホルダフレームを再エンコード・送出する
     const int64_t frame_interval_us = 1'000'000LL / config_.encoder.fps;
-    const int64_t elapsed_us = placeholder_frame_timer_.elapsed_us();
-    if (elapsed_us < frame_interval_us) {
-        // 残り時間分だけ sleep することで実効 fps の精度を高める
-        // (固定 10ms sleep では高 fps 設定時に実効 fps が低下するため)
-        constexpr int64_t kMaxSleepMs = 10;
-        int64_t remaining_ms = (frame_interval_us - elapsed_us) / 1000;
-        int64_t sleep_ms = std::clamp<int64_t>(remaining_ms, 1, kMaxSleepMs);
-        std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
+    if (placeholder_frame_timer_.elapsed_us() < frame_interval_us) {
+        // 送信間隔未満の場合は何もせず return する。
+        // run() ループ末尾の固定 sleep により次回呼び出しまでの間隔が確保されるため、
+        // ここで追加の sleep を行うと sleep が積み重なり実効 fps が低下してしまう。
         return;
     }
     placeholder_frame_timer_.reset();

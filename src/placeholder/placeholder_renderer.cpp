@@ -48,11 +48,21 @@ public:
         bmi.bmiHeader.biCompression = BI_RGB;
 
         bitmap_ = CreateDIBSection(dc_, &bmi, DIB_RGB_COLORS, &bits_, nullptr, 0);
-        if (bitmap_) old_bitmap_ = static_cast<HBITMAP>(SelectObject(dc_, bitmap_));
+        if (bitmap_) {
+            HGDIOBJ prev = SelectObject(dc_, bitmap_);
+            if (prev != nullptr && prev != HGDI_ERROR) {
+                old_bitmap_ = static_cast<HBITMAP>(prev);
+            } else {
+                // SelectObject 失敗時は DIB を破棄し、valid() が false を返すようにする
+                DeleteObject(bitmap_);
+                bitmap_ = nullptr;
+                bits_   = nullptr;
+            }
+        }
     }
 
     ~DibCanvas() {
-        if (old_bitmap_) SelectObject(dc_, old_bitmap_);
+        if (dc_ && old_bitmap_) SelectObject(dc_, old_bitmap_);
         if (bitmap_) DeleteObject(bitmap_);
         if (dc_) DeleteDC(dc_);
     }
@@ -98,12 +108,21 @@ void draw_centered_text(HDC dc, const RECT& rect, const std::wstring& text,
                          COLORREF color, int font_height, bool bold) {
     if (text.empty()) return;
     GdiFont font(font_height, bold);
-    HFONT old_font = static_cast<HFONT>(SelectObject(dc, font.handle()));
+
+    // CreateFontW/SelectObject の失敗時は元のフォントのまま描画する
+    // (フォールバック)。HGDI_ERROR を old_font に保持しないようにする。
+    HFONT old_font = nullptr;
+    if (font.handle()) {
+        HGDIOBJ prev = SelectObject(dc, font.handle());
+        if (prev != nullptr && prev != HGDI_ERROR) old_font = static_cast<HFONT>(prev);
+    }
+
     SetTextColor(dc, color);
     SetBkMode(dc, TRANSPARENT);
     RECT r = rect;
     DrawTextW(dc, text.c_str(), -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    SelectObject(dc, old_font);
+
+    if (old_font) SelectObject(dc, old_font);
 }
 
 } // namespace
