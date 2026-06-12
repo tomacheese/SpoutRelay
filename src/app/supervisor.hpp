@@ -99,6 +99,15 @@ private:
     time_utils::Stopwatch placeholder_frame_timer_;
     time_utils::Stopwatch placeholder_probe_timer_;
 
+    /// @brief PLACEHOLDER 状態を抜けてから PROBING/CONNECTING_OUTPUT を経て
+    ///        再び PLACEHOLDER へ戻るまでの最小間隔を測るタイマー。
+    ///        ソースが probe には応答するもののフレーム送出が始まらない
+    ///        (CONNECTING_OUTPUT がタイムアウトする) ケースで、
+    ///        PROBING ⇔ PLACEHOLDER 間でエンコーダー/RTSP の再初期化が
+    ///        高頻度に繰り返されることを防ぐ。
+    time_utils::Stopwatch placeholder_cooldown_timer_;
+    bool placeholder_cooldown_active_ = false;
+
     /// @brief handle_connecting_output() で取得した最初のフレーム。
     ///        encode_publish_thread_func() の初期フリーズフレームとして渡すことで、
     ///        Spout 送信側が静止画面のまま SendImage() を止めている場合でも

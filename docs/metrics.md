@@ -20,7 +20,7 @@
 
 | フィールド | 型 | 説明 |
 |----------|----|------|
-| `healthy` | bool | `true`: 正常状態（IDLE/PROBING/CONNECTING_OUTPUT/STREAMING）、`false`: それ以外 |
+| `healthy` | bool | `true`: 正常状態（IDLE/PROBING/PLACEHOLDER/CONNECTING_OUTPUT/STREAMING）、`false`: それ以外 |
 | `state` | string | 現在のステートマシン状態名 |
 | `ts` | string | ISO 8601 タイムスタンプ（UTC） |
 
@@ -28,8 +28,10 @@
 
 | 状態 | healthy |
 |------|---------|
-| `IDLE`, `PROBING`, `CONNECTING_OUTPUT`, `STREAMING` | `true` |
+| `IDLE`, `PROBING`, `PLACEHOLDER`, `CONNECTING_OUTPUT`, `STREAMING` | `true` |
 | `STALLED`, `RECONNECTING_OUTPUT`, `RECONFIGURING`, `FATAL`, その他 | `false` |
+
+`PLACEHOLDER` は `placeholder.enabled=true` の場合に、NO SIGNAL 映像を RTSP へ継続配信している正常な状態であるため `healthy: true` となります。
 
 ---
 

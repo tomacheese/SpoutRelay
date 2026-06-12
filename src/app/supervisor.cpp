@@ -137,6 +137,17 @@ void Supervisor::handle_probing() {
     // ソースが見つからない間、プレースホルダ (NO SIGNAL) 映像の配信が
     // 有効であれば PLACEHOLDER 状態へ遷移する。
     if (config_.placeholder.enabled) {
+        // フリッカー対策: PLACEHOLDER を抜けた直後（CONNECTING_OUTPUT が
+        // 初回フレーム待ちでタイムアウトし PROBING に戻ってきた場合等）は、
+        // reconnect_delay_ms の間 PLACEHOLDER への再突入を抑制し、
+        // エンコーダー/RTSP の再初期化が高頻度に繰り返されることを防ぐ。
+        if (placeholder_cooldown_active_ &&
+            !placeholder_cooldown_timer_.expired(config_.rtsp.reconnect_delay_ms)) {
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(config_.spout.poll_interval_ms));
+            return;
+        }
+        placeholder_cooldown_active_ = false;
         state_machine_.transition_to(PublisherState::PLACEHOLDER);
         return;
     }
@@ -196,6 +207,11 @@ void Supervisor::handle_placeholder() {
                 teardown_rtsp();
                 teardown_encoder();
                 placeholder_active_ = false;
+                // PLACEHOLDER を抜けた直後の再突入をクールダウンするためのタイマーを開始する。
+                // CONNECTING_OUTPUT が初回フレーム待ちでタイムアウトし PROBING 経由で
+                // 戻ってきた場合でも、reconnect_delay_ms の間は再初期化を抑制する。
+                placeholder_cooldown_timer_.reset();
+                placeholder_cooldown_active_ = true;
                 state_machine_.transition_to(PublisherState::CONNECTING_OUTPUT);
                 return;
             }
