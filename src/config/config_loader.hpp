@@ -18,6 +18,18 @@ struct AppConfig {
         bool prefer_dx11              = true;
     } spout;
 
+    /// @brief Spout 映像/デバイスが見つからない間に配信する
+    ///        プレースホルダ（NO SIGNAL）映像の設定。
+    struct Placeholder {
+        bool enabled               = false;        // 既定で無効（オプトイン）。既存挙動を維持する
+        int  width                 = 1280;         // 直近のソース解像度が不明な場合に使用する幅
+        int  height                = 720;          // 直近のソース解像度が不明な場合に使用する高さ
+        std::string message        = "NO SIGNAL";  // 中央に表示するメッセージ
+        std::string background_hex = "#000000";    // 背景色 (#RRGGBB)
+        std::string text_hex       = "#FFFFFF";    // 文字色 (#RRGGBB)
+        bool show_sender_name      = true;         // 待機中の sender_name をメッセージ下に表示する
+    } placeholder;
+
     EncoderConfig encoder;
     RtspConfig    rtsp;
 

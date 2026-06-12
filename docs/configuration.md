@@ -47,6 +47,15 @@ spout-relay.exe --config config/config.json
     "shutdown_grace_ms": 3000,
     "emit_metrics_interval_ms": 1000,
     "emit_health_interval_ms": 1000
+  },
+  "placeholder": {
+    "enabled": false,
+    "width": 1280,
+    "height": 720,
+    "message": "NO SIGNAL",
+    "background_hex": "#000000",
+    "text_hex": "#FFFFFF",
+    "show_sender_name": true
   }
 }
 ```
@@ -161,6 +170,28 @@ NVENC では `tune` オプションがサポートされていないため自動
 
 ---
 
+## `placeholder` セクション
+
+Spout 映像/デバイスが見つからない間（起動時の未接続、または配信中のソース消失）に、その旨を示すプレースホルダ（NO SIGNAL）映像を RTSP に配信し続けるための設定です。
+
+| キー | 型 | デフォルト | 説明 |
+|-----|----|-----------|------|
+| `enabled` | bool | `false` | プレースホルダ配信を有効化する。`false`（既定）の場合は既存挙動のまま、ソース未接続中は配信を開始しない |
+| `width` | int | `1280` | 直近に接続したソースの解像度が不明な場合に使用するプレースホルダ映像の幅（px）。正の整数であること |
+| `height` | int | `720` | 直近に接続したソースの解像度が不明な場合に使用するプレースホルダ映像の高さ（px）。正の整数であること |
+| `message` | string | `"NO SIGNAL"` | プレースホルダ映像の中央に表示するメッセージ |
+| `background_hex` | string | `"#000000"` | プレースホルダ映像の背景色。`#RRGGBB` 形式 |
+| `text_hex` | string | `"#FFFFFF"` | メッセージ・センダー名の文字色。`#RRGGBB` 形式 |
+| `show_sender_name` | bool | `true` | メッセージの下に、待機中の Spout センダー名を併記する |
+
+### 動作概要
+
+- `enabled: true` の場合、ソースが見つからない間は新設の `PLACEHOLDER` 状態に遷移し、プレースホルダ映像を `encoder.fps` で配信し続けます（RTSP ストリーム自体は維持されます）。
+- 解像度は、直近に実ソースへ接続した際の解像度が分かっていればそれを優先し、不明な場合は `width`/`height` を使用します（解像度切替による RTSP 再構成を最小化するため）。
+- 実ソースが出現すると自動的に通常の配信（`CONNECTING_OUTPUT` 以降）へ復帰します。
+
+---
+
 ## 設定のバリデーション
 
 起動時に以下がチェックされます：
@@ -178,5 +209,9 @@ NVENC では `tune` オプションがサポートされていないため自動
 - `rtsp.reconnect_max_delay_ms` > 0
 - `rtsp.reconnect_max_delay_ms` ≥ `rtsp.reconnect_delay_ms`
 - `rtsp.reconnect_backoff_multiplier` ≥ 1.0
+- `placeholder.width` > 0
+- `placeholder.height` > 0
+- `placeholder.background_hex` が `#RRGGBB` 形式であること
+- `placeholder.text_hex` が `#RRGGBB` 形式であること
 
 バリデーションエラーは `CONFIG_VALIDATION_ERROR` コードで標準エラーへ出力されます。

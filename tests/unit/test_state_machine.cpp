@@ -133,6 +133,30 @@ int run_state_machine_tests() {
     }
 
     {
+        // PROBING → PLACEHOLDER → CONNECTING_OUTPUT
+        // (ソースが見つからない間 NO SIGNAL 映像を配信し、ソース出現で復帰する)
+        StateMachine sm;
+        sm.transition_to(PublisherState::IDLE);
+        sm.transition_to(PublisherState::PROBING);
+        bool ok1 = sm.transition_to(PublisherState::PLACEHOLDER);
+        VERIFY_MSG(ok1, "PROBING → PLACEHOLDER should succeed");
+        bool ok2 = sm.transition_to(PublisherState::CONNECTING_OUTPUT);
+        VERIFY_MSG(ok2, "PLACEHOLDER → CONNECTING_OUTPUT should succeed");
+        printf("[PASS] PROBING → PLACEHOLDER → CONNECTING_OUTPUT\n");
+    }
+
+    {
+        // PLACEHOLDER → STOPPING (シャットダウン要求時)
+        StateMachine sm;
+        sm.transition_to(PublisherState::IDLE);
+        sm.transition_to(PublisherState::PROBING);
+        sm.transition_to(PublisherState::PLACEHOLDER);
+        bool ok = sm.transition_to(PublisherState::STOPPING);
+        VERIFY_MSG(ok, "PLACEHOLDER → STOPPING should succeed");
+        printf("[PASS] PLACEHOLDER → STOPPING\n");
+    }
+
+    {
         // RECONFIGURING → FATAL (解像度変更後のエンコーダー再初期化が失敗した場合)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);

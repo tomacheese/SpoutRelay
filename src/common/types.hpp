@@ -8,6 +8,7 @@ enum class PublisherState {
     INIT,
     IDLE,
     PROBING,
+    PLACEHOLDER,
     CONNECTING_OUTPUT,
     STREAMING,
     STALLED,
@@ -22,6 +23,7 @@ inline const char* state_name(PublisherState s) {
         case PublisherState::INIT:               return "INIT";
         case PublisherState::IDLE:               return "IDLE";
         case PublisherState::PROBING:            return "PROBING";
+        case PublisherState::PLACEHOLDER:        return "PLACEHOLDER";
         case PublisherState::CONNECTING_OUTPUT:  return "CONNECTING_OUTPUT";
         case PublisherState::STREAMING:          return "STREAMING";
         case PublisherState::STALLED:            return "STALLED";

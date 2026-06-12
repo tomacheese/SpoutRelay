@@ -105,5 +105,21 @@ int run_metrics_tests() {
         printf("[PASS] save_health marks FATAL as not healthy\n");
     }
 
+    {
+        // PLACEHOLDER state (NO SIGNAL 映像を継続配信中) is healthy
+        MetricsStore ms;
+        ms.set_state("PLACEHOLDER");
+        std::string path = "test_health_placeholder_tmp.json";
+        ms.save_health(path);
+
+        std::ifstream f(path);
+        std::string content((std::istreambuf_iterator<char>(f)),
+                             std::istreambuf_iterator<char>());
+        VERIFY(content.find("\"healthy\": true") != std::string::npos ||
+               content.find("\"healthy\":true") != std::string::npos);
+        std::remove(path.c_str());
+        printf("[PASS] save_health marks PLACEHOLDER as healthy\n");
+    }
+
     return 0;
 }

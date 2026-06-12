@@ -32,6 +32,14 @@ void test_load_minimal_valid() {
     VERIFY(cfg.rtsp.url == "rtsp://192.168.0.100:8554/live");
     VERIFY(cfg.encoder.fps == 30);
     VERIFY(cfg.encoder.bitrate_kbps == 4000);
+    // placeholder セクション省略時は既存挙動を維持する既定値となること
+    VERIFY(cfg.placeholder.enabled == false);
+    VERIFY(cfg.placeholder.width == 1280);
+    VERIFY(cfg.placeholder.height == 720);
+    VERIFY(cfg.placeholder.message == "NO SIGNAL");
+    VERIFY(cfg.placeholder.background_hex == "#000000");
+    VERIFY(cfg.placeholder.text_hex == "#FFFFFF");
+    VERIFY(cfg.placeholder.show_sender_name == true);
     printf("[PASS] test_load_minimal_valid\n");
 }
 
@@ -136,6 +144,7 @@ void test_invalid_fps_fails() {
 extern int run_state_machine_tests();
 extern int run_metrics_tests();
 extern int run_backoff_tests();
+extern int run_placeholder_renderer_tests();
 
 void test_invalid_rtsp_url_prefix_fails() {
     const std::string json = R"({
@@ -150,6 +159,69 @@ void test_invalid_rtsp_url_prefix_fails() {
     cleanup(path);
     VERIFY_MSG(!ok, "Non-rtsp:// URL should fail validation");
     printf("[PASS] test_invalid_rtsp_url_prefix_fails\n");
+}
+
+void test_load_placeholder_section() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender" },
+      "rtsp": { "url": "rtsp://192.168.0.100:8554/live" },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 },
+      "placeholder": {
+        "enabled": true,
+        "width": 1920,
+        "height": 1080,
+        "message": "WAITING",
+        "background_hex": "#112233",
+        "text_hex": "#aabbcc",
+        "show_sender_name": false
+      }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(ok, "placeholder section should load");
+    VERIFY(cfg.placeholder.enabled == true);
+    VERIFY(cfg.placeholder.width == 1920);
+    VERIFY(cfg.placeholder.height == 1080);
+    VERIFY(cfg.placeholder.message == "WAITING");
+    VERIFY(cfg.placeholder.background_hex == "#112233");
+    VERIFY(cfg.placeholder.text_hex == "#aabbcc");
+    VERIFY(cfg.placeholder.show_sender_name == false);
+    printf("[PASS] test_load_placeholder_section\n");
+}
+
+void test_invalid_placeholder_hex_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender" },
+      "rtsp": { "url": "rtsp://192.168.0.100:8554/live" },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 },
+      "placeholder": { "background_hex": "not-a-color" }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "Invalid placeholder.background_hex should fail validation");
+    printf("[PASS] test_invalid_placeholder_hex_fails\n");
+}
+
+void test_invalid_placeholder_size_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender" },
+      "rtsp": { "url": "rtsp://192.168.0.100:8554/live" },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 },
+      "placeholder": { "width": 0, "height": 720 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "Non-positive placeholder.width should fail validation");
+    printf("[PASS] test_invalid_placeholder_size_fails\n");
 }
 
 void test_empty_sender_name_fails() {
@@ -176,10 +248,14 @@ int main() {
     test_invalid_fps_fails();
     test_invalid_rtsp_url_prefix_fails();
     test_empty_sender_name_fails();
+    test_load_placeholder_section();
+    test_invalid_placeholder_hex_fails();
+    test_invalid_placeholder_size_fails();
 
     run_state_machine_tests();
     run_metrics_tests();
     run_backoff_tests();
+    run_placeholder_renderer_tests();
 
     printf("\nAll tests passed.\n");
     return 0;

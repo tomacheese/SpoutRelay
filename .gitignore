@@ -15,3 +15,7 @@ deps/mediamtx/
 
 # Test temp files
 test_*_tmp.json
+
+# MediaMTX 自動生成 TLS 証明書
+auto.crt
+auto.key

@@ -12,6 +12,15 @@
     "sender_missing_timeout_ms": 800,
     "prefer_dx11": true
   },
+  "placeholder": {
+    "enabled": false,
+    "width": 1280,
+    "height": 720,
+    "message": "NO SIGNAL",
+    "background_hex": "#000000",
+    "text_hex": "#FFFFFF",
+    "show_sender_name": true
+  },
   "encoder": {
     "codec": "h264_nvenc",
     "fallback_codec": "h264_mf",

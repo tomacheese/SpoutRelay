@@ -8,6 +8,7 @@
 #include "capture/frame_pump.hpp"
 #include "encoder/encoder_controller.hpp"
 #include "rtsp/rtsp_publisher_client.hpp"
+#include "placeholder/placeholder_renderer.hpp"
 #include <atomic>
 #include <thread>
 #include <memory>
@@ -24,6 +25,7 @@ public:
 private:
     void handle_idle();
     void handle_probing();
+    void handle_placeholder();
     void handle_connecting_output();
     void handle_streaming();
     void handle_stalled();
@@ -35,6 +37,17 @@ private:
     void teardown_streaming();
     void teardown_encoder();
     void teardown_rtsp();
+
+    /// @brief 指定解像度でエンコーダーを初期化し、RTSP クライアントを接続する。
+    ///
+    /// handle_connecting_output() / handle_reconfiguring() / handle_placeholder()
+    /// で重複していたエンコーダー初期化・RTSP 接続処理を共通化したもの。
+    /// 失敗時は呼び出し側で teardown_encoder()/teardown_rtsp() を行うこと。
+    ///
+    /// @param width,height 映像解像度
+    /// @param error 失敗時のエラーメッセージ
+    /// @return 成功時 true
+    bool init_encoder_and_rtsp(uint32_t width, uint32_t height, std::string& error);
 
     // Encode/publish thread (H-05)
     void encode_publish_thread_func();
@@ -70,6 +83,52 @@ private:
     uint32_t current_width_  = 0;
     uint32_t current_height_ = 0;
     int reconnect_attempts_  = 0;
+
+    /// @brief 直近に接続した実ソースの解像度。
+    ///        PLACEHOLDER 状態で映像を生成する際、config の既定解像度より
+    ///        この値を優先することで、ソース復帰時の RTSP 再構成を避ける。
+    uint32_t last_source_width_  = 0;
+    uint32_t last_source_height_ = 0;
+
+    /// @brief PLACEHOLDER 状態で配信中のフレーム。静止画のため一度だけ生成し、
+    ///        設定 fps で繰り返しエンコードする。
+    FrameBuffer placeholder_frame_;
+    FrameMeta   placeholder_meta_{};
+    bool        placeholder_active_         = false;
+    bool        placeholder_content_changed_ = true;
+    time_utils::Stopwatch placeholder_frame_timer_;
+    time_utils::Stopwatch placeholder_probe_timer_;
+
+    /// @brief PLACEHOLDER 状態での fps/bitrate 計測用カウンター。
+    ///        encode_publish_thread_func() の同等ロジックと同じ方式で
+    ///        1 秒ごとに metrics へ反映する。
+    uint64_t              placeholder_frames_since_last_ = 0;
+    uint64_t              placeholder_bytes_since_last_  = 0;
+    time_utils::Stopwatch placeholder_metrics_sw_;
+
+    /// @brief PLACEHOLDER 状態を抜けてから PROBING/CONNECTING_OUTPUT を経て
+    ///        再び PLACEHOLDER へ戻るまでの最小間隔を測るタイマー。
+    ///        ソースが probe には応答するもののフレーム送出が始まらない
+    ///        (CONNECTING_OUTPUT がタイムアウトする) ケースで、
+    ///        PROBING ⇔ PLACEHOLDER 間でエンコーダー/RTSP の再初期化が
+    ///        高頻度に繰り返されることを防ぐ。
+    time_utils::Stopwatch placeholder_cooldown_timer_;
+    bool placeholder_cooldown_active_ = false;
+
+    /// @brief PLACEHOLDER ↔ STREAMING シームレス移行フラグ。
+    ///
+    ///        true のとき、encoder_ と rtsp_client_ は既に初期化済みであり
+    ///        解像度が一致すれば teardown/reinit をスキップして RTSP セッションを
+    ///        維持したまま映像ソースを切り替える。
+    ///        これにより視聴者側での PTS リセット・再バッファリングを防ぐ。
+    ///
+    ///        セット箇所:
+    ///          - handle_stalled(): 送信元消失 → PLACEHOLDER 遷移時
+    ///          - handle_placeholder(): ソース検出 → CONNECTING_OUTPUT 遷移時
+    ///        クリア箇所:
+    ///          - handle_placeholder() init ブロック
+    ///          - handle_connecting_output() 解像度チェック後
+    bool seamless_handoff_ = false;
 
     /// @brief handle_connecting_output() で取得した最初のフレーム。
     ///        encode_publish_thread_func() の初期フリーズフレームとして渡すことで、
