@@ -654,10 +654,25 @@ void Supervisor::handle_stopping() {
 
 bool Supervisor::init_encoder_and_rtsp(uint32_t width, uint32_t height, std::string& error) {
     encoder_ = std::make_unique<EncoderController>();
-    if (!encoder_->init(config_.encoder, width, height, error)) {
+
+    // GPU ゼロコピーパスを試みる: SpoutMonitor が保持する D3D11 デバイスを渡す
+    void* gpu_dev = spout_monitor_ ? spout_monitor_->gpu_device() : nullptr;
+    if (!encoder_->init(config_.encoder, width, height, error, gpu_dev)) {
         log_->log_error("ENCODER_INIT_FAILED", error);
         return false;
     }
+
+    // GPU パスが確立された場合は SpoutMonitor を GPU テクスチャモードに切り替える
+    if (encoder_->gpu_path_active()) {
+        spout_monitor_->set_gpu_mode(true);
+        log_->log_event(spdlog::level::info, "gpu_zero_copy_enabled",
+                        {{"codec", config_.encoder.codec}});
+    } else {
+        spout_monitor_->set_gpu_mode(false);
+        log_->log_event(spdlog::level::info, "gpu_zero_copy_disabled",
+                        {{"codec", config_.encoder.codec}});
+    }
+
     log_->log_encoder_initialized(
         config_.encoder.codec,
         static_cast<int>(width), static_cast<int>(height),
@@ -853,6 +868,11 @@ void Supervisor::teardown_encoder() {
         encoder_->reset();
         encoder_.reset();
     }
+    // GPU テクスチャポインタを保持したまま SpoutMonitor が disconnect すると
+    // use-after-free になるため、エンコーダー解体時に必ず CPU パスへ戻す。
+    if (spout_monitor_) spout_monitor_->set_gpu_mode(false);
+    // initial_frame_buf_ が GPU テクスチャポインタを持っている場合もクリアする
+    initial_frame_buf_.gpu_texture = nullptr;
 }
 
 void Supervisor::teardown_rtsp() {

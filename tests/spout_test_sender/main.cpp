@@ -17,6 +17,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // 前回実行で force-kill されたセンダーが Spout 名前リストに残っている場合、
+    // SetSenderName() がインクリメント済み名前 (TestSpoutSender_1) を使うため
+    // リレーが名前を見つけられなくなる。事前に孤立エントリを一掃しておく。
+    sender.sendernames.CleanSenders();
     sender.SetSenderName(name);
     printf("[sender] Sending as '%s' (%ux%u)...\n", name, W, H);
     fflush(stdout);

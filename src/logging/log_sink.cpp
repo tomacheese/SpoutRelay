@@ -32,6 +32,10 @@ bool LogSink::init(const std::string& log_dir,
         // Plain message pattern (JSON is built manually)
         logger_->set_pattern("%v");
         logger_->set_level(spdlog::level::debug);
+        // info 以上のメッセージを即座にディスクへフラッシュする。
+        // E2E テストの Wait-Stream が publish_started を
+        // ログポーリングで検出できるようにするために必要。
+        logger_->flush_on(spdlog::level::info);
 
     } catch (const std::exception& e) {
         error = std::string("Failed to init log sink: ") + e.what();
