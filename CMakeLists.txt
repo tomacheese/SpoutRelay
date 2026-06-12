@@ -114,6 +114,7 @@ set(LIB_SOURCES
     src/rtsp/rtsp_publisher_client.cpp
     src/metrics/metrics_store.cpp
     src/logging/log_sink.cpp
+    src/placeholder/placeholder_renderer.cpp
 )
 
 add_library(publisher_lib STATIC ${LIB_SOURCES})

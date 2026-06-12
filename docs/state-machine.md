@@ -7,6 +7,7 @@
 | `INIT` | 起動直後の初期状態。コンポーネントの初期化を行う |
 | `IDLE` | Spout センダーを待機中。設定ロード・ログ初期化済み |
 | `PROBING` | 指定センダーの存在を確認中（SpoutDX GetSenderInfo） |
+| `PLACEHOLDER` | センダー未検出時に「NO SIGNAL」プレースホルダ映像を配信中（`placeholder.enabled=true` の場合のみ） |
 | `CONNECTING_OUTPUT` | エンコーダー初期化 → RTSP 接続 → 初回フレーム受信を試みる |
 | `STREAMING` | 正常配信中。フレームキャプチャ → エンコード → RTSP 送信 |
 | `STALLED` | フレームが一定時間届かない（センダー停止の可能性） |
@@ -32,7 +33,15 @@
               │ ┌──▶│ PROBING  │◀──────────────────┐
               │ │   └────┬─────┘                    │
               │ │        │ センダー発見              │
-              │ │        ▼                          │
+              │ │        │                          │
+              │ │        │  未検出 & placeholder有効  │
+              │ │        │        │                 │
+              │ │        │        ▼                 │
+              │ │        │  ┌─────────────┐          │
+              │ │        │  │ PLACEHOLDER │          │
+              │ │        │  └──────┬──────┘          │
+              │ │        │         │ センダー発見     │
+              │ │        ▼         ▼                 │
               │ │   ┌───────────────────┐           │
               │ │   │ CONNECTING_OUTPUT │           │
               │ │   └────────┬──────────┘           │
@@ -78,10 +87,14 @@
 | IDLE | STOPPING | シャットダウン要求 |
 | PROBING | CONNECTING_OUTPUT | センダー発見 |
 | PROBING | IDLE | タイムアウト（センダー未検出） |
+| PROBING | PLACEHOLDER | センダー未検出 & `placeholder.enabled=true` |
 | PROBING | STOPPING | シャットダウン要求 |
+| PLACEHOLDER | CONNECTING_OUTPUT | センダー発見（プレースホルダ配信から復帰） |
+| PLACEHOLDER | STOPPING | シャットダウン要求 |
 | CONNECTING_OUTPUT | STREAMING | 全接続成功 |
 | CONNECTING_OUTPUT | PROBING | フレームタイムアウト / エンコーダー失敗 |
 | CONNECTING_OUTPUT | STOPPING | シャットダウン要求 |
+| CONNECTING_OUTPUT | FATAL | 全コーデックでエンコーダー初期化失敗 |
 | STREAMING | STALLED | フレームタイムアウト |
 | STREAMING | RECONFIGURING | 解像度変更検出 |
 | STREAMING | RECONNECTING_OUTPUT | RTSP 送信エラー |
@@ -95,6 +108,7 @@
 | STALLED | STOPPING | シャットダウン要求 |
 | RECONFIGURING | STREAMING | 再設定成功 |
 | RECONFIGURING | STOPPING | シャットダウン要求 |
+| RECONFIGURING | FATAL | 解像度変更後のエンコーダー再初期化失敗 |
 | RECONNECTING_OUTPUT | STREAMING | 再接続成功 |
 | RECONNECTING_OUTPUT | FATAL | 最大再接続回数超過 |
 | RECONNECTING_OUTPUT | STOPPING | シャットダウン要求 |

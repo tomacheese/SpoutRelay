@@ -54,6 +54,7 @@ void Supervisor::run() {
         switch (state_machine_.current_state()) {
             case PublisherState::IDLE:               handle_idle();               break;
             case PublisherState::PROBING:            handle_probing();            break;
+            case PublisherState::PLACEHOLDER:        handle_placeholder();        break;
             case PublisherState::CONNECTING_OUTPUT:  handle_connecting_output();  break;
             case PublisherState::STREAMING:          handle_streaming();          break;
             case PublisherState::STALLED:            handle_stalled();            break;
@@ -133,8 +134,106 @@ void Supervisor::handle_probing() {
                         {{"name", config_.spout.sender_name}});
     }
 
+    // ソースが見つからない間、プレースホルダ (NO SIGNAL) 映像の配信が
+    // 有効であれば PLACEHOLDER 状態へ遷移する。
+    if (config_.placeholder.enabled) {
+        state_machine_.transition_to(PublisherState::PLACEHOLDER);
+        return;
+    }
+
     std::this_thread::sleep_for(
         std::chrono::milliseconds(config_.spout.poll_interval_ms));
+}
+
+void Supervisor::handle_placeholder() {
+    if (shutdown_requested_.load()) {
+        teardown_streaming();
+        state_machine_.transition_to(PublisherState::STOPPING);
+        return;
+    }
+
+    if (!placeholder_active_) {
+        // 直近に接続した実ソースの解像度が分かっていれば優先する。
+        // ソースが同解像度で復帰した際の RTSP 再構成を避けられる。
+        uint32_t w = last_source_width_  ? last_source_width_  : static_cast<uint32_t>(config_.placeholder.width);
+        uint32_t h = last_source_height_ ? last_source_height_ : static_cast<uint32_t>(config_.placeholder.height);
+
+        placeholder_frame_ = render_placeholder_frame(config_.placeholder, config_.spout.sender_name, w, h);
+        placeholder_meta_  = FrameMeta{};
+        placeholder_meta_.width  = w;
+        placeholder_meta_.height = h;
+        placeholder_content_changed_ = true;
+
+        std::string init_err;
+        if (!init_encoder_and_rtsp(w, h, init_err)) {
+            teardown_rtsp();
+            teardown_encoder();
+            // PLACEHOLDER のまま次回リトライする
+            std::this_thread::sleep_for(std::chrono::milliseconds(config_.rtsp.reconnect_delay_ms));
+            return;
+        }
+
+        current_width_  = w;
+        current_height_ = h;
+        log_->log_publish_started(config_.rtsp.url,
+            static_cast<int>(w), static_cast<int>(h), config_.encoder.fps);
+        log_->log_event(spdlog::level::info, "placeholder_started",
+                        {{"name", config_.spout.sender_name}});
+
+        placeholder_active_ = true;
+        placeholder_frame_timer_.reset();
+        placeholder_probe_timer_.reset();
+    }
+
+    // 実ソースが復帰したか poll_interval_ms ごとに確認する
+    if (placeholder_probe_timer_.expired(config_.spout.poll_interval_ms)) {
+        placeholder_probe_timer_.reset();
+        if (spout_monitor_->probe_sender(config_.spout.sender_name)) {
+            std::string connect_err;
+            if (spout_monitor_->connect(config_.spout.sender_name, connect_err)) {
+                log_->log_event(spdlog::level::info, "placeholder_source_found",
+                                {{"name", config_.spout.sender_name}});
+                teardown_rtsp();
+                teardown_encoder();
+                placeholder_active_ = false;
+                state_machine_.transition_to(PublisherState::CONNECTING_OUTPUT);
+                return;
+            }
+            log_->log_error("SPOUT_CONNECT_FAILED", connect_err);
+        }
+    }
+
+    // 設定 fps に基づいてプレースホルダフレームを再エンコード・送出する
+    const int64_t frame_interval_us = 1'000'000LL / config_.encoder.fps;
+    if (placeholder_frame_timer_.elapsed_us() < frame_interval_us) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        return;
+    }
+    placeholder_frame_timer_.reset();
+    placeholder_meta_.timestamp_us = time_utils::now_us();
+
+    // 静止画のため 2 回目以降は content_changed=false で sws_scale をスキップする
+    std::vector<EncodedPacket> packets;
+    if (!encoder_->encode(placeholder_frame_, placeholder_meta_, packets, placeholder_content_changed_)) {
+        log_->log_error("ENCODER_ENCODE_FAILED", "placeholder encode() returned false");
+        teardown_rtsp();
+        teardown_encoder();
+        placeholder_active_ = false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(config_.rtsp.reconnect_delay_ms));
+        return;
+    }
+    placeholder_content_changed_ = false;
+
+    for (auto& pkt : packets) {
+        if (!rtsp_client_->send_packet(pkt)) {
+            log_->log_error("RTSP_SEND_FAILED", "placeholder send_packet failed");
+            teardown_rtsp();
+            teardown_encoder();
+            placeholder_active_ = false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(config_.rtsp.reconnect_delay_ms));
+            return;
+        }
+    }
 }
 
 void Supervisor::handle_connecting_output() {
@@ -179,28 +278,13 @@ void Supervisor::handle_connecting_output() {
     current_width_  = meta.width;
     current_height_ = meta.height;
 
-    // Init encoder
-    encoder_ = std::make_unique<EncoderController>();
-    std::string enc_err;
-    if (!encoder_->init(config_.encoder, current_width_, current_height_, enc_err)) {
-        log_->log_error("ENCODER_INIT_FAILED", enc_err);
-        teardown_encoder();
-        spout_monitor_->disconnect();
-        state_machine_.transition_to(PublisherState::PROBING);
-        return;
-    }
-    log_->log_encoder_initialized(
-        config_.encoder.codec,
-        static_cast<int>(current_width_), static_cast<int>(current_height_),
-        config_.encoder.fps, config_.encoder.bitrate_kbps);
-    metrics_->set_encoder_codec(config_.encoder.codec);
+    // 直近に接続した実ソースの解像度を記録する。PLACEHOLDER 状態で
+    // この解像度を優先することで、ソース復帰時の RTSP 再構成を避ける。
+    last_source_width_  = current_width_;
+    last_source_height_ = current_height_;
 
-    // Init RTSP client
-    rtsp_client_ = std::make_unique<RtspPublisherClient>();
-    std::string rtsp_err;
-    auto codec_info = encoder_->get_codec_info();
-    if (!rtsp_client_->connect(config_.rtsp, codec_info, rtsp_err)) {
-        log_->log_error("RTSP_CONNECT_FAILED", rtsp_err);
+    std::string init_err;
+    if (!init_encoder_and_rtsp(current_width_, current_height_, init_err)) {
         teardown_rtsp();
         teardown_encoder();
         spout_monitor_->disconnect();
@@ -342,21 +426,8 @@ void Supervisor::handle_reconfiguring() {
     teardown_rtsp();
     teardown_encoder();
 
-    std::string enc_err;
-    encoder_ = std::make_unique<EncoderController>();
-    if (!encoder_->init(config_.encoder, current_width_, current_height_, enc_err)) {
-        log_->log_error("ENCODER_INIT_FAILED", enc_err);
-        teardown_encoder();
-        spout_monitor_->disconnect();
-        state_machine_.transition_to(PublisherState::PROBING);
-        return;
-    }
-
-    std::string rtsp_err;
-    rtsp_client_ = std::make_unique<RtspPublisherClient>();
-    auto codec_info = encoder_->get_codec_info();
-    if (!rtsp_client_->connect(config_.rtsp, codec_info, rtsp_err)) {
-        log_->log_error("RTSP_CONNECT_FAILED", rtsp_err);
+    std::string init_err;
+    if (!init_encoder_and_rtsp(current_width_, current_height_, init_err)) {
         teardown_rtsp();
         teardown_encoder();
         spout_monitor_->disconnect();
@@ -364,9 +435,9 @@ void Supervisor::handle_reconfiguring() {
         return;
     }
 
-    log_->log_encoder_initialized(config_.encoder.codec,
-        static_cast<int>(current_width_), static_cast<int>(current_height_),
-        config_.encoder.fps, config_.encoder.bitrate_kbps);
+    // 解像度変更でも直近のソース解像度を更新しておく
+    last_source_width_  = current_width_;
+    last_source_height_ = current_height_;
 
     frame_pump_->start(spout_monitor_, config_.spout.poll_interval_ms);
     last_frame_time_ms_.store(time_utils::now_ms());
@@ -439,6 +510,29 @@ void Supervisor::handle_stopping() {
     log_->flush();
     if (state_machine_.can_transition(PublisherState::IDLE))
         state_machine_.transition_to(PublisherState::IDLE);
+}
+
+// ---- Init helpers -----------------------------------------------------------
+
+bool Supervisor::init_encoder_and_rtsp(uint32_t width, uint32_t height, std::string& error) {
+    encoder_ = std::make_unique<EncoderController>();
+    if (!encoder_->init(config_.encoder, width, height, error)) {
+        log_->log_error("ENCODER_INIT_FAILED", error);
+        return false;
+    }
+    log_->log_encoder_initialized(
+        config_.encoder.codec,
+        static_cast<int>(width), static_cast<int>(height),
+        config_.encoder.fps, config_.encoder.bitrate_kbps);
+    metrics_->set_encoder_codec(config_.encoder.codec);
+
+    rtsp_client_ = std::make_unique<RtspPublisherClient>();
+    auto codec_info = encoder_->get_codec_info();
+    if (!rtsp_client_->connect(config_.rtsp, codec_info, error)) {
+        log_->log_error("RTSP_CONNECT_FAILED", error);
+        return false;
+    }
+    return true;
 }
 
 // ---- Cleanup helpers -------------------------------------------------------

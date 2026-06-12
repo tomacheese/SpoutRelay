@@ -1,9 +1,19 @@
 #include "config/config_loader.hpp"
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <sstream>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
+
+/// @brief 文字列が "#RRGGBB" 形式の 16 進数カラーコードかどうかを判定する
+static bool is_valid_hex_color(const std::string& s) {
+    if (s.size() != 7 || s[0] != '#') return false;
+    return std::all_of(s.begin() + 1, s.end(), [](unsigned char c) {
+        return std::isxdigit(c) != 0;
+    });
+}
 
 static void parse_encoder(const json& j, EncoderConfig& cfg) {
     if (j.contains("codec"))           cfg.codec           = j["codec"].get<std::string>();
@@ -62,6 +72,18 @@ bool ConfigLoader::load(const std::string& path, AppConfig& out, std::string& er
             if (s.contains("sender_missing_timeout_ms"))
                 out.spout.sender_missing_timeout_ms = s["sender_missing_timeout_ms"].get<int>();
             if (s.contains("prefer_dx11"))             out.spout.prefer_dx11             = s["prefer_dx11"].get<bool>();
+        }
+
+        // placeholder section
+        if (j.contains("placeholder")) {
+            const auto& p = j["placeholder"];
+            if (p.contains("enabled"))          out.placeholder.enabled          = p["enabled"].get<bool>();
+            if (p.contains("width"))            out.placeholder.width            = p["width"].get<int>();
+            if (p.contains("height"))           out.placeholder.height           = p["height"].get<int>();
+            if (p.contains("message"))          out.placeholder.message          = p["message"].get<std::string>();
+            if (p.contains("background_hex"))   out.placeholder.background_hex   = p["background_hex"].get<std::string>();
+            if (p.contains("text_hex"))         out.placeholder.text_hex         = p["text_hex"].get<std::string>();
+            if (p.contains("show_sender_name")) out.placeholder.show_sender_name = p["show_sender_name"].get<bool>();
         }
 
         // encoder section
@@ -134,6 +156,18 @@ bool ConfigLoader::load(const std::string& path, AppConfig& out, std::string& er
     }
     if (out.rtsp.reconnect_backoff_multiplier < 1.0f) {
         error = "rtsp.reconnect_backoff_multiplier must be >= 1.0";
+        return false;
+    }
+    if (out.placeholder.width <= 0 || out.placeholder.height <= 0) {
+        error = "placeholder.width and placeholder.height must be positive";
+        return false;
+    }
+    if (!is_valid_hex_color(out.placeholder.background_hex)) {
+        error = "placeholder.background_hex must be in #RRGGBB format";
+        return false;
+    }
+    if (!is_valid_hex_color(out.placeholder.text_hex)) {
+        error = "placeholder.text_hex must be in #RRGGBB format";
         return false;
     }
 
