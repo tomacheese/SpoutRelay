@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 
 namespace {
 
@@ -114,9 +115,20 @@ FrameBuffer render_placeholder_frame(const AppConfig::Placeholder& cfg,
     out.width  = width;
     out.height = height;
     out.format = PixelFormat::RGBA;
-    out.data.assign(static_cast<size_t>(width) * height * 4, 0);
 
+    // 0x0 はクラッシュさせず空バッファを返す
     if (width == 0 || height == 0) return out;
+
+    // width*height*4 が size_t の範囲を超える場合は確保せず空バッファを返す
+    // (極端な解像度指定によるオーバーフロー/巨大確保を防ぐ)
+    constexpr uint64_t kMaxPixels = std::numeric_limits<size_t>::max() / 4;
+    if (static_cast<uint64_t>(width) * static_cast<uint64_t>(height) > kMaxPixels) {
+        out.width  = 0;
+        out.height = 0;
+        return out;
+    }
+
+    out.data.assign(static_cast<size_t>(width) * height * 4, 0);
 
     DibCanvas canvas(width, height);
     if (!canvas.valid()) return out;

@@ -1,5 +1,6 @@
 #include "app/supervisor.hpp"
 #include "common/time_utils.hpp"
+#include <algorithm>
 #include <thread>
 #include <chrono>
 #include <stdexcept>
@@ -221,8 +222,14 @@ void Supervisor::handle_placeholder() {
 
     // 設定 fps に基づいてプレースホルダフレームを再エンコード・送出する
     const int64_t frame_interval_us = 1'000'000LL / config_.encoder.fps;
-    if (placeholder_frame_timer_.elapsed_us() < frame_interval_us) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const int64_t elapsed_us = placeholder_frame_timer_.elapsed_us();
+    if (elapsed_us < frame_interval_us) {
+        // 残り時間分だけ sleep することで実効 fps の精度を高める
+        // (固定 10ms sleep では高 fps 設定時に実効 fps が低下するため)
+        constexpr int64_t kMaxSleepMs = 10;
+        int64_t remaining_ms = (frame_interval_us - elapsed_us) / 1000;
+        int64_t sleep_ms = std::clamp<int64_t>(remaining_ms, 1, kMaxSleepMs);
+        std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
         return;
     }
     placeholder_frame_timer_.reset();
