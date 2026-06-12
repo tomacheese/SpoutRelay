@@ -195,6 +195,9 @@ void Supervisor::handle_placeholder() {
         placeholder_active_ = true;
         placeholder_frame_timer_.reset();
         placeholder_probe_timer_.reset();
+        placeholder_frames_since_last_ = 0;
+        placeholder_bytes_since_last_  = 0;
+        placeholder_metrics_sw_.reset();
     }
 
     // 実ソースが復帰したか poll_interval_ms ごとに確認する
@@ -249,8 +252,30 @@ void Supervisor::handle_placeholder() {
             teardown_rtsp();
             teardown_encoder();
             placeholder_active_ = false;
+            // メトリクスをリセットして次回の encode_publish_thread_func と混在しないようにする
+            placeholder_frames_since_last_ = 0;
+            placeholder_bytes_since_last_  = 0;
+            placeholder_metrics_sw_.reset();
             std::this_thread::sleep_for(std::chrono::milliseconds(config_.rtsp.reconnect_delay_ms));
             return;
+        }
+        placeholder_bytes_since_last_ += pkt.data.size();
+    }
+
+    if (!packets.empty()) {
+        metrics_->increment_frames_encoded();
+        placeholder_frames_since_last_++;
+
+        // 1 秒ごとに fps / bitrate_kbps を更新する（encode_publish_thread_func と同じ方式）
+        int64_t elapsed_ms = placeholder_metrics_sw_.elapsed_ms();
+        if (elapsed_ms >= 1000) {
+            double fps  = placeholder_frames_since_last_ * 1000.0 / elapsed_ms;
+            double kbps = placeholder_bytes_since_last_  * 8.0   / elapsed_ms;
+            metrics_->set_current_fps(fps);
+            metrics_->set_bitrate_kbps(kbps);
+            placeholder_frames_since_last_ = 0;
+            placeholder_bytes_since_last_  = 0;
+            placeholder_metrics_sw_.reset();
         }
     }
 }

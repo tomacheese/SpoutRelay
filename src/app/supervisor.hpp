@@ -99,6 +99,13 @@ private:
     time_utils::Stopwatch placeholder_frame_timer_;
     time_utils::Stopwatch placeholder_probe_timer_;
 
+    /// @brief PLACEHOLDER 状態での fps/bitrate 計測用カウンター。
+    ///        encode_publish_thread_func() の同等ロジックと同じ方式で
+    ///        1 秒ごとに metrics へ反映する。
+    uint64_t              placeholder_frames_since_last_ = 0;
+    uint64_t              placeholder_bytes_since_last_  = 0;
+    time_utils::Stopwatch placeholder_metrics_sw_;
+
     /// @brief PLACEHOLDER 状態を抜けてから PROBING/CONNECTING_OUTPUT を経て
     ///        再び PLACEHOLDER へ戻るまでの最小間隔を測るタイマー。
     ///        ソースが probe には応答するもののフレーム送出が始まらない
