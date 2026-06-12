@@ -33,6 +33,7 @@ void StateMachine::build_transition_table() {
         {S::STALLED,            S::STOPPING},
         {S::STALLED,            S::IDLE},
         {S::STALLED,            S::PROBING},
+        {S::STALLED,            S::PLACEHOLDER},
         {S::RECONFIGURING,      S::STREAMING},
         {S::RECONFIGURING,      S::STOPPING},
         {S::RECONFIGURING,      S::FATAL},

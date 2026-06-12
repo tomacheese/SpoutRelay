@@ -115,6 +115,21 @@ private:
     time_utils::Stopwatch placeholder_cooldown_timer_;
     bool placeholder_cooldown_active_ = false;
 
+    /// @brief PLACEHOLDER ↔ STREAMING シームレス移行フラグ。
+    ///
+    ///        true のとき、encoder_ と rtsp_client_ は既に初期化済みであり
+    ///        解像度が一致すれば teardown/reinit をスキップして RTSP セッションを
+    ///        維持したまま映像ソースを切り替える。
+    ///        これにより視聴者側での PTS リセット・再バッファリングを防ぐ。
+    ///
+    ///        セット箇所:
+    ///          - handle_stalled(): 送信元消失 → PLACEHOLDER 遷移時
+    ///          - handle_placeholder(): ソース検出 → CONNECTING_OUTPUT 遷移時
+    ///        クリア箇所:
+    ///          - handle_placeholder() init ブロック
+    ///          - handle_connecting_output() 解像度チェック後
+    bool seamless_handoff_ = false;
+
     /// @brief handle_connecting_output() で取得した最初のフレーム。
     ///        encode_publish_thread_func() の初期フリーズフレームとして渡すことで、
     ///        Spout 送信側が静止画面のまま SendImage() を止めている場合でも
