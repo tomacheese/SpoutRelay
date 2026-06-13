@@ -144,7 +144,7 @@ publisher/
 │   ├── rtsp/         # FFmpeg RTSP ANNOUNCE/RECORD クライアント
 │   └── spout/        # SpoutDX レシーバー（SpoutMonitor）
 ├── tests/
-│   ├── unit/         # カスタムテストランナーによるユニットテスト（97 アサーション）
+│   ├── unit/         # カスタムテストランナーによるユニットテスト（97 [PASS] 行）
 │   └── spout_test_sender/  # E2E テスト用カラーサイクル DX11 Spout センダー
 ├── config/
 │   ├── config.example.json

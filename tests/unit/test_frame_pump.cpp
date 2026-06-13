@@ -108,7 +108,7 @@ int run_frame_pump_tests() {
         // 古いフレームが破棄され、キューが一定サイズに収まること
         auto mock = std::make_shared<MockSpoutMonitor>();
         FramePump pump;
-        pump.start(mock, 0); // poll_interval_ms=0 でキャプチャスレッドを高速に回す
+        pump.start(mock, 1); // poll_interval_ms=1 でキャプチャスレッドを高速に回す
 
         // キューに十分なバックログが積まれるまで待つ
         std::this_thread::sleep_for(std::chrono::milliseconds(100));

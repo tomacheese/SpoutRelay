@@ -2,6 +2,7 @@
 #include <fstream>
 #include <filesystem>
 #include <sstream>
+#include <stdexcept>
 #include <vector>
 #include <nlohmann/json.hpp>
 #include "logging/log_sink.hpp"
