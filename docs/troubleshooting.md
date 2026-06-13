@@ -168,11 +168,10 @@ target_link_libraries(spout2_static PRIVATE version)
 Start-Process deps\mediamtx\mediamtx.exe
 
 # 2. テスト用 Spout センダー起動（実際の Spout 送信側がない場合）
-Start-Process publisher\build\spout_test_sender.exe
+Start-Process build\spout_test_sender.exe
 
 # 3. Publisher 起動
-cd publisher\build
-.\spout-relay.exe --config ..\config\config.json
+.\build\spout-relay.exe --config config\config.json
 
 # 4. FFprobe で確認
 ffprobe rtsp://192.168.0.100:8554/live

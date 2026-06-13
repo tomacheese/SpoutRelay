@@ -81,8 +81,9 @@ ffplay rtsp://<mediamtx-host>:8554/live
 ## ソースからビルド
 
 ```powershell
-# 1. ディレクトリへ展開
-cd publisher
+# 1. リポジトリをクローン（サブモジュール含む）
+git clone --recurse-submodules https://github.com/tomacheese/SpoutRelay.git
+cd SpoutRelay
 
 # 2. MinGW ツールチェーンで CMake 設定
 cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=toolchain-mingw.cmake
@@ -132,20 +133,22 @@ spout-relay.exe --help
 ## ディレクトリ構成
 
 ```text
-publisher/
+SpoutRelay/
 ├── src/
 │   ├── app/          # Supervisor（オーケストレーター）+ StateMachine
 │   ├── capture/      # FramePump – キャプチャスレッド＋有界キュー
 │   ├── common/       # 型定義、エラーコード、時刻ユーティリティ
 │   ├── config/       # JSON 設定ローダー
-│   ├── encoder/      # FFmpeg H.264 エンコーダー（NVENC / libx264）
+│   ├── encoder/      # FFmpeg H.264 エンコーダー（NVENC / h264_mf）
 │   ├── logging/      # spdlog JSON Lines シンク
 │   ├── metrics/      # MetricsStore → health.json / metrics.json
+│   ├── placeholder/  # NO SIGNAL プレースホルダーフレーム生成
 │   ├── rtsp/         # FFmpeg RTSP ANNOUNCE/RECORD クライアント
 │   └── spout/        # SpoutDX レシーバー（SpoutMonitor）
 ├── tests/
-│   ├── unit/         # カスタムテストランナーによるユニットテスト（97 [PASS] 行）
+│   ├── unit/         # カスタムテストランナーによるユニットテスト（約 97 [PASS]）
 │   └── spout_test_sender/  # E2E テスト用カラーサイクル DX11 Spout センダー
+├── e2e-test/         # PowerShell 7+ E2E・モンキーテストスクリプト
 ├── config/
 │   ├── config.example.json
 │   └── config.json   # （.gitignore 対象、ローカル設定）

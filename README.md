@@ -1,15 +1,18 @@
-# Spout RTSP Publisher
+# SpoutRelay
 
-A Windows application that captures frames from a [Spout2](https://spout.zeal.co/) GPU-shared texture sender, encodes them as H.264 via FFmpeg (NVENC → libx264 fallback), and publishes to an RTSP server (e.g. [MediaMTX](https://github.com/bluenviron/mediamtx)).
+A Windows application that captures frames from a [Spout2](https://spout.zeal.co/) GPU-shared texture sender, encodes them as H.264 via FFmpeg (NVENC → `h264_mf` fallback), and publishes to an RTSP server (e.g. [MediaMTX](https://github.com/bluenviron/mediamtx)).
+
+> 日本語版 README は [README-ja.md](README-ja.md) を参照してください。
 
 ## Features
 
 - **Zero-copy Spout capture** — receives DX11 shared-texture frames via SpoutDX
-- **Hardware H.264 encoding** — prefers NVIDIA NVENC; falls back to software libx264
+- **Hardware H.264 encoding** — prefers NVIDIA NVENC; falls back to `h264_mf` (Windows Media Foundation)
 - **RTSP ANNOUNCE/RECORD** — pushes stream to any RTSP server over TCP
 - **Automatic reconnection** — exponential back-off on encoder or RTSP failures
 - **Structured JSON logging** — JSON Lines event log with timestamps
-- **Runtime metrics** — live `health.json` / `metrics.json` written to disk every second
+- **Runtime metrics** — live `health.json` / `metrics.json` written to disk (skips write when unchanged)
+- **NO SIGNAL placeholder** — optional placeholder video when the Spout sender is absent
 - **State-machine driven** — explicit state transitions; no undefined behaviour on failure
 
 ## Requirements
@@ -81,8 +84,9 @@ Press `Ctrl+C` to stop the publisher gracefully.
 ## Build from Source
 
 ```powershell
-# 1. Clone / extract into a directory
-cd publisher
+# 1. Clone the repository (with submodules)
+git clone --recurse-submodules https://github.com/tomacheese/SpoutRelay.git
+cd SpoutRelay
 
 # 2. Configure CMake with the MinGW toolchain
 cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=toolchain-mingw.cmake
@@ -92,16 +96,17 @@ cmake --build build
 
 # 4. Copy FFmpeg DLLs next to the executable
 #    (avcodec-62.dll, avformat-62.dll, avutil-60.dll, swscale-9.dll, swresample-6.dll)
+Copy-Item deps\ffmpeg\bin\*.dll build\
 
 # 5. Edit config
-cp config/config.example.json config/config.json
+Copy-Item config\config.example.json config\config.json
 # Set spout.sender_name and rtsp.url
 
 # 6. Start MediaMTX (or any RTSP server)
-deps/mediamtx/mediamtx.exe
+deps\mediamtx\mediamtx.exe
 
 # 7. Run
-build/spout-relay.exe --config config/config.json
+build\spout-relay.exe --config config\config.json
 ```
 
 The stream is then available at `rtsp://<server-ip>:8554/live` (VLC, FFplay, etc.).
@@ -132,24 +137,26 @@ Full reference: [`docs/configuration.md`](docs/configuration.md)
 ## Project Layout
 
 ```text
-publisher/
+SpoutRelay/
 ├── src/
 │   ├── app/          # Supervisor (orchestrator) + StateMachine
 │   ├── capture/      # FramePump – capture thread + bounded queue
 │   ├── common/       # Types, error codes, time utilities
 │   ├── config/       # JSON config loader
-│   ├── encoder/      # FFmpeg H.264 encoder (NVENC / libx264)
+│   ├── encoder/      # FFmpeg H.264 encoder (NVENC / h264_mf)
 │   ├── logging/      # spdlog JSON Lines sink
 │   ├── metrics/      # MetricsStore → health.json / metrics.json
+│   ├── placeholder/  # NO SIGNAL placeholder frame generator
 │   ├── rtsp/         # FFmpeg RTSP ANNOUNCE/RECORD client
 │   └── spout/        # SpoutDX receiver (SpoutMonitor)
 ├── tests/
-│   ├── unit/         # Custom-runner unit tests (31 tests)
-│   └── spout_test_sender/  # Color-cycling DX11 Spout sender for E2E testing
+│   ├── unit/                # Unit tests (custom runner, ~97 PASS)
+│   └── spout_test_sender/   # Color-cycling DX11 Spout sender for E2E
+├── e2e-test/                # PowerShell 7+ E2E & monkey-test scripts
 ├── config/
 │   ├── config.example.json
-│   └── config.json   # (gitignored, your local config)
-└── docs/             # Category-specific documentation (Japanese)
+│   └── config.json          # (gitignored, your local config)
+└── docs/                    # Per-category documentation (Japanese)
 ```
 
 ## Documentation
@@ -161,18 +168,27 @@ publisher/
 | [docs/configuration.md](docs/configuration.md) | Full configuration reference |
 | [docs/state-machine.md](docs/state-machine.md) | State machine: states, transitions, error handling |
 | [docs/metrics.md](docs/metrics.md) | Metrics/health JSON format, event log format |
+| [docs/testing.md](docs/testing.md) | Test categories, test case list, manual scenarios |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Common errors and solutions |
 
-> All docs are written in Japanese. See [README-ja.md](README-ja.md) for the Japanese README.
+> Documentation in `docs/` is written in Japanese. See [README-ja.md](README-ja.md) for the Japanese README.
 
 ## Running Tests
 
 The test suite uses a custom test runner (no external test framework required).
 
 ```powershell
-build/tests/publisher_tests.exe
-# Expected output ends with: All N tests passed.
+# Unit tests (always run after any change)
+cmake --build build --target publisher_tests -j 4
+.\build\tests\publisher_tests.exe
+# Expected output ends with: All tests passed.  (~97 [PASS] lines)
+
+# E2E tests (for state machine / RTSP / encoder changes)
+pwsh e2e-test/run-tests.ps1
+pwsh e2e-test/monkey-tests.ps1
 ```
+
+See [`docs/testing.md`](docs/testing.md) for the full test procedure and scenario list.
 
 ## License
 
@@ -181,6 +197,6 @@ The project is licensed under the [MIT License](LICENSE).
 This project uses:
 
 - [Spout2](https://github.com/leadedge/Spout2) — BSD-2-Clause
-- [FFmpeg](https://ffmpeg.org/) — LGPL-2.1+
+- [FFmpeg](https://ffmpeg.org/) — LGPL-2.1+ (win64-lgpl-shared build)
 - [nlohmann/json](https://github.com/nlohmann/json) — MIT
 - [spdlog](https://github.com/gabime/spdlog) — MIT
