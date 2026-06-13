@@ -93,9 +93,10 @@ cmake --build build
 
 # 4. FFmpeg DLL を実行ファイルと同じ場所へコピー
 #    (avcodec-62.dll, avformat-62.dll, avutil-60.dll, swscale-9.dll, swresample-6.dll)
+Copy-Item deps\ffmpeg\bin\*.dll build\
 
 # 5. 設定ファイルを編集
-cp config/config.example.json config/config.json
+Copy-Item config\config.example.json config\config.json
 # spout.sender_name と rtsp.url を設定
 
 # 6. MediaMTX（または任意の RTSP サーバー）を起動
