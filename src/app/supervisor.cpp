@@ -580,6 +580,11 @@ void Supervisor::handle_reconfiguring() {
     frame_pump_->start(spout_monitor_, config_.spout.poll_interval_ms);
     last_frame_time_ms_.store(time_utils::now_ms());
     start_encode_thread();
+    // 解像度変更後の再開始を publish_started で明示する。
+    // handle_connecting_output() と同様にテスト・監視系が検出できるようにする。
+    log_->log_publish_started(config_.rtsp.url,
+        static_cast<int>(current_width_), static_cast<int>(current_height_),
+        config_.encoder.fps);
     state_machine_.transition_to(PublisherState::STREAMING);
 }
 

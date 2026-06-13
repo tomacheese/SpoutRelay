@@ -103,17 +103,28 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
         if (!ok) return false;
 
         // 寸法変更 / 初回接続更新イベントの処理
-        if (impl_->receiver.IsUpdated()) {
+        //
+        // ReceiveTexture() (引数なし) は内部で m_bUpdated をリセットするため
+        // IsUpdated() は常に false を返す。そのため IsUpdated() に加えて
+        // GetSenderWidth/Height() を直接比較して寸法変更を確実に検出する。
+        // （ReceiveImage() や ReceiveTexture(ppTexture) は IsUpdated() が機能するが
+        //   ReceiveTexture() 無引数版のみ内部処理でフラグを消費してしまう仕様）
+        {
             unsigned int nw = impl_->receiver.GetSenderWidth();
             unsigned int nh = impl_->receiver.GetSenderHeight();
-            impl_->current_info.width  = nw ? nw : w;
-            impl_->current_info.height = nh ? nh : h;
-            impl_->current_info.name   = impl_->receiver.GetSenderName();
-            impl_->current_info.fps    = static_cast<float>(impl_->receiver.GetSenderFps());
-            if (nw && nh && (nw != w || nh != h)) { w = nw; h = nh; }
-            is_new = false;  // 更新イベント: 次回呼び出しで実データ取得
-        } else {
-            is_new = impl_->receiver.IsFrameNew();
+            bool updated = impl_->receiver.IsUpdated();  // 初回接続時などは true
+            bool dim_changed = (nw && nh && (nw != w || nh != h));
+
+            if (updated || dim_changed) {
+                impl_->current_info.width  = nw ? nw : w;
+                impl_->current_info.height = nh ? nh : h;
+                impl_->current_info.name   = impl_->receiver.GetSenderName();
+                impl_->current_info.fps    = static_cast<float>(impl_->receiver.GetSenderFps());
+                if (nw && nh && (nw != w || nh != h)) { w = nw; h = nh; }
+                is_new = false;  // 更新イベント: 次回呼び出しで実データ取得
+            } else {
+                is_new = impl_->receiver.IsFrameNew();
+            }
         }
 
         // GetSenderTexture() は SpoutDX 内部テクスチャ (BGRA) のポインタを返す。
