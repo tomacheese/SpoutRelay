@@ -121,5 +121,124 @@ int run_metrics_tests() {
         printf("[PASS] save_health marks PLACEHOLDER as healthy\n");
     }
 
+    // ---- Diff-skip tests ------------------------------------------------
+
+    {
+        // save_health: second call with unchanged state must skip write
+        MetricsStore ms;
+        ms.set_state("STREAMING");
+        std::string path = "test_health_skip_tmp.json";
+
+        bool first = ms.save_health(path);
+        VERIFY_MSG(first, "first save_health should write (payload changed from empty)");
+
+        // Read the timestamp written on first write
+        std::string ts1;
+        {
+            std::ifstream f(path);
+            std::string c((std::istreambuf_iterator<char>(f)),
+                           std::istreambuf_iterator<char>());
+            auto p = c.find("\"ts\":");
+            if (p != std::string::npos) ts1 = c.substr(p, 40);
+        }
+
+        bool second = ms.save_health(path);
+        VERIFY_MSG(!second, "second save_health with same state should be skipped");
+
+        // File should still exist and contain the original ts
+        {
+            std::ifstream f(path);
+            std::string c((std::istreambuf_iterator<char>(f)),
+                           std::istreambuf_iterator<char>());
+            VERIFY_MSG(!c.empty(), "file should still exist after skip");
+            if (!ts1.empty())
+                VERIFY_MSG(c.find(ts1) != std::string::npos,
+                           "ts should be unchanged when write is skipped");
+        }
+        std::remove(path.c_str());
+        printf("[PASS] save_health skips write when state is unchanged\n");
+    }
+
+    {
+        // save_health: write resumes after state changes
+        MetricsStore ms;
+        ms.set_state("STREAMING");
+        std::string path = "test_health_resume_tmp.json";
+
+        ms.save_health(path);         // first write
+        ms.save_health(path);         // skipped
+        ms.set_state("FATAL");
+        bool third = ms.save_health(path);
+        VERIFY_MSG(third, "save_health should write again after state changes to FATAL");
+
+        std::ifstream f(path);
+        std::string c((std::istreambuf_iterator<char>(f)),
+                       std::istreambuf_iterator<char>());
+        VERIFY(c.find("\"state\": \"FATAL\"") != std::string::npos ||
+               c.find("\"state\":\"FATAL\"") != std::string::npos);
+        std::remove(path.c_str());
+        printf("[PASS] save_health resumes write after state transition\n");
+    }
+
+    {
+        // save_metrics: second call with unchanged counters must skip write
+        MetricsStore ms;
+        ms.mark_session_start();
+        ms.set_state("IDLE");
+        std::string path = "test_metrics_skip_tmp.json";
+
+        bool first = ms.save_metrics(path);
+        VERIFY_MSG(first, "first save_metrics should write");
+
+        bool second = ms.save_metrics(path);
+        VERIFY_MSG(!second, "second save_metrics with same counters should be skipped");
+
+        std::remove(path.c_str());
+        printf("[PASS] save_metrics skips write when counters are unchanged\n");
+    }
+
+    {
+        // save_metrics: write resumes after counter increments
+        MetricsStore ms;
+        ms.mark_session_start();
+        ms.set_state("STREAMING");
+        std::string path = "test_metrics_resume_tmp.json";
+
+        ms.save_metrics(path);               // first write
+        ms.save_metrics(path);               // skipped (no change)
+        ms.increment_frames_received();
+        bool third = ms.save_metrics(path);
+        VERIFY_MSG(third, "save_metrics should write again after counter increments");
+
+        std::ifstream f(path);
+        std::string c((std::istreambuf_iterator<char>(f)),
+                       std::istreambuf_iterator<char>());
+        VERIFY(c.find("\"frames_received\": 1") != std::string::npos ||
+               c.find("\"frames_received\":1") != std::string::npos);
+        std::remove(path.c_str());
+        printf("[PASS] save_metrics resumes write after counter increment\n");
+    }
+
+    {
+        // save_metrics: uptime_ms and ts must be present in written file
+        // even though they are excluded from the diff comparison.
+        MetricsStore ms;
+        ms.mark_session_start();
+        ms.set_state("STREAMING");
+        std::string path = "test_metrics_fields_tmp.json";
+
+        ms.save_metrics(path);
+
+        std::ifstream f(path);
+        std::string c((std::istreambuf_iterator<char>(f)),
+                       std::istreambuf_iterator<char>());
+        VERIFY_MSG(c.find("\"uptime_ms\"") != std::string::npos,
+                   "uptime_ms must be present in written metrics.json");
+        VERIFY_MSG(c.find("\"ts\"") != std::string::npos,
+                   "ts must be present in written metrics.json");
+        std::remove(path.c_str());
+        printf("[PASS] save_metrics includes uptime_ms and ts in written file\n");
+    }
+
     return 0;
 }

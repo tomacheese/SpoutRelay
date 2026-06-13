@@ -26,9 +26,13 @@ public:
     void reset_session_counters();
     void mark_session_start();
 
-    // Serialise to files
-    bool save_metrics(const std::string& path) const;
-    bool save_health(const std::string& path) const;
+    // Serialise to files.
+    // Returns true when the file was written, false when the content was
+    // unchanged since the last write (skip) or when a write error occurred.
+    // NOTE: these are intentionally non-const because they update the cached
+    //       "last written" payload used for diff-skip detection.
+    bool save_metrics(const std::string& path);
+    bool save_health(const std::string& path);
 
     // Read-only snapshot values
     uint64_t frames_received()    const { return frames_received_.load(); }
@@ -38,8 +42,14 @@ public:
     uint64_t reconnect_attempts() const { return reconnect_attempts_.load(); }
 
 private:
-    std::string build_metrics_json() const;
-    std::string build_health_json()  const;
+    // Build JSON strings.
+    //   with_ts=true  — full output: includes both "ts" (live ISO 8601 timestamp)
+    //                   and "uptime_ms" (time since session start).
+    //   with_ts=false — comparable output: omits "ts" and "uptime_ms" so the
+    //                   result can be used for diff-skip without those
+    //                   continuously-changing fields masking real diffs.
+    std::string build_metrics_json(bool with_ts = true) const;
+    std::string build_health_json(bool with_ts = true)  const;
 
     std::atomic<uint64_t> frames_received_{0};
     std::atomic<uint64_t> frames_encoded_{0};
@@ -58,4 +68,9 @@ private:
     std::string rtsp_url_;
     std::string encoder_codec_;
     int64_t     session_start_ms_ = 0;
+
+    // Cached payloads (ts-less) from the most recent successful write.
+    // Protected by mutex_ for save_metrics / save_health callers.
+    std::string last_metrics_payload_;
+    std::string last_health_payload_;
 };

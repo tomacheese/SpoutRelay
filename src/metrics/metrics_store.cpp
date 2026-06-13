@@ -63,7 +63,7 @@ void MetricsStore::mark_session_start() {
     session_start_ms_ = time_utils::system_now_ms();
 }
 
-std::string MetricsStore::build_metrics_json() const {
+std::string MetricsStore::build_metrics_json(bool with_ts) const {
     json j;
     {
         std::lock_guard<std::mutex> lk(mutex_);
@@ -76,19 +76,25 @@ std::string MetricsStore::build_metrics_json() const {
         j["current_fps"]   = current_fps_;
         j["rtsp_url"]      = rtsp_url_;
         j["encoder_codec"] = encoder_codec_;
-        int64_t uptime_ms = time_utils::system_now_ms() - session_start_ms_;
-        j["uptime_ms"]     = uptime_ms;
+        // uptime_ms is omitted from the ts-less (comparable) build because it
+        // changes every tick and would defeat the diff-skip for idle states.
+        // It is added below only when we are constructing the full output.
+        if (with_ts) {
+            int64_t uptime_ms = time_utils::system_now_ms() - session_start_ms_;
+            j["uptime_ms"] = uptime_ms;
+        }
     }
     j["frames_received"]    = frames_received_.load();
     j["frames_encoded"]     = frames_encoded_.load();
     j["frames_dropped"]     = frames_dropped_.load();
     j["rtsp_errors"]        = rtsp_errors_.load();
     j["reconnect_attempts"] = reconnect_attempts_.load();
-    j["ts"]                 = time_utils::iso8601_now();
+    if (with_ts)
+        j["ts"] = time_utils::iso8601_now();
     return j.dump(2);
 }
 
-std::string MetricsStore::build_health_json() const {
+std::string MetricsStore::build_health_json(bool with_ts) const {
     json j;
     std::string state;
     {
@@ -101,7 +107,8 @@ std::string MetricsStore::build_health_json() const {
                     state == "PLACEHOLDER");
     j["healthy"] = healthy;
     j["state"]   = state;
-    j["ts"]      = time_utils::iso8601_now();
+    if (with_ts)
+        j["ts"] = time_utils::iso8601_now();
     return j.dump(2);
 }
 
@@ -126,10 +133,40 @@ static bool write_atomic(const std::string& path, const std::string& content) {
     }
 }
 
-bool MetricsStore::save_metrics(const std::string& path) const {
-    return write_atomic(path, build_metrics_json());
+bool MetricsStore::save_metrics(const std::string& path) {
+    // Build a ts-less snapshot for change detection.
+    std::string payload = build_metrics_json(/*with_ts=*/false);
+    {
+        std::lock_guard<std::mutex> lk(mutex_);
+        if (payload == last_metrics_payload_)
+            return false;   // unchanged — skip write
+    }
+    // Content changed: rebuild with a fresh timestamp and persist.
+    // Update the cached payload only after a successful write so that
+    // transient write failures are retried on the next interval.
+    bool ok = write_atomic(path, build_metrics_json(/*with_ts=*/true));
+    if (ok) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        last_metrics_payload_ = payload;
+    }
+    return ok;
 }
 
-bool MetricsStore::save_health(const std::string& path) const {
-    return write_atomic(path, build_health_json());
+bool MetricsStore::save_health(const std::string& path) {
+    // Build a ts-less snapshot for change detection.
+    std::string payload = build_health_json(/*with_ts=*/false);
+    {
+        std::lock_guard<std::mutex> lk(mutex_);
+        if (payload == last_health_payload_)
+            return false;   // unchanged — skip write
+    }
+    // Content changed: rebuild with a fresh timestamp and persist.
+    // Update the cached payload only after a successful write so that
+    // transient write failures are retried on the next interval.
+    bool ok = write_atomic(path, build_health_json(/*with_ts=*/true));
+    if (ok) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        last_health_payload_ = payload;
+    }
+    return ok;
 }
