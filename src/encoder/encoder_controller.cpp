@@ -225,6 +225,11 @@ bool EncoderController::init(const EncoderConfig& config,
             impl_->hw_frames_ctx  = hw_frames_ctx_tmp;
             impl_->d3d_ctx        = d3d_ctx_tmp;
             impl_->last_hw_frame  = av_frame_alloc();
+            if (!impl_->last_hw_frame) {
+                reset();
+                error = "av_frame_alloc failed for last_hw_frame (GPU path)";
+                return false;
+            }
 
             impl_->pkt = av_packet_alloc();
             if (!impl_->pkt) {
@@ -390,7 +395,10 @@ bool EncoderController::encode(const FrameBuffer& frame,
 
             // last_hw_frame に保存して content_changed=false 時に再利用する
             av_frame_unref(impl_->last_hw_frame);
-            av_frame_ref(impl_->last_hw_frame, hw_frame);
+            if (av_frame_ref(impl_->last_hw_frame, hw_frame) < 0) {
+                av_frame_free(&hw_frame);
+                return false;
+            }
             av_frame_free(&hw_frame);
         }
 
@@ -468,13 +476,13 @@ void EncoderController::reset() {
     if (impl_->last_hw_frame) { av_frame_free(&impl_->last_hw_frame); }
     if (impl_->hw_frames_ctx) { av_buffer_unref(&impl_->hw_frames_ctx); }
     if (impl_->hw_device_ctx) { av_buffer_unref(&impl_->hw_device_ctx); }
+    if (impl_->d3d_ctx)       { impl_->d3d_ctx->Release(); impl_->d3d_ctx = nullptr; }
     if (impl_->codec_ctx)     { avcodec_free_context(&impl_->codec_ctx); }
     impl_->frame_count    = 0;
     impl_->force_next_idr = false;
     impl_->codec          = nullptr;
     impl_->codec_name.clear();
     impl_->gpu_path       = false;
-    impl_->d3d_ctx        = nullptr;
     width_  = 0;
     height_ = 0;
 }

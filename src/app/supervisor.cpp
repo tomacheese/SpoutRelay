@@ -724,7 +724,9 @@ void Supervisor::encode_publish_thread_func() {
     // 送れるようになる（ScreenRelay PR #6 と同じ修正）。
     FrameBuffer freeze_buf  = std::move(initial_frame_buf_);
     FrameMeta   freeze_meta = initial_frame_meta_;
-    bool        has_freeze  = !freeze_buf.data.empty();
+    // GPU パスでは buf.data が空で gpu_texture のみ設定される。
+    // どちらか一方でも有効ならフリーズフレームとして扱う。
+    bool        has_freeze  = !freeze_buf.data.empty() || freeze_buf.gpu_texture != nullptr;
     initial_frame_meta_ = {};  // メモリ解放（コピー済み）
     bool        content_changed = true;  // sws_scale スキップ判定用
 

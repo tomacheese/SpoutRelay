@@ -176,6 +176,7 @@ bool SpoutMonitor::is_connected() const {
 }
 
 void* SpoutMonitor::gpu_device() {
+    std::lock_guard<std::mutex> lock(impl_->mutex_);
     return static_cast<void*>(impl_->receiver.GetDX11Device());
 }
 
