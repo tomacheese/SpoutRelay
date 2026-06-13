@@ -9,7 +9,16 @@
 > - **health.json**: `state` が変化しない限りほぼ書き込まれません（STREAMING 継続中など通常運用時はほぼゼロ）。
 > - **metrics.json**: `frames_received` 等のカウンタが増加している間は毎回書き込まれますが、IDLE/STALLED などカウンタが進まない状態では書き込みをスキップします。
 >
-> このため、`health.json` の `ts` フィールドは「最後にファイルを確認した時刻」ではなく「**ヘルス状態が最後に変化した時刻**」を示します。プロセスの死活監視には、より頻繁に更新される `metrics.json` の `ts` フィールドか、イベントログ（`app.log_dir`）の最終更新時刻を使用することを推奨します。
+> このため、各ファイルの `ts` フィールドは以下の意味に変わります:
+>
+> | ファイル | `ts` の意味 |
+> |---------|------------|
+> | `health.json` | **ヘルス状態（`state`/`healthy`）が最後に変化した時刻** |
+> | `metrics.json` | **フレームカウンタ等のメトリクスが最後に変化した時刻** |
+>
+> **死活監視（プロセスが生きているか）への影響**:
+> - STREAMING 中はフレームカウンタが毎秒増加するため、`metrics.json` の `ts` はほぼ毎秒更新されます。
+> - **IDLE / STALLED 中はカウンタも状態も変化しないため、どちらのファイルの `ts` も更新されません。** これらの状態でプロセスの生存確認が必要な場合は、OS のプロセス確認（例: `Get-Process spout-relay`）を使用するか、`emit_metrics_interval_ms` の間隔を短くした上でこの最適化の効果を再検討してください。
 
 > **emit interval とストレージ書き込み頻度**
 >
@@ -54,7 +63,7 @@
 |----------|----|------|
 | `healthy` | bool | `true`: 正常状態（IDLE/PROBING/PLACEHOLDER/CONNECTING_OUTPUT/STREAMING）、`false`: それ以外 |
 | `state` | string | 現在のステートマシン状態名 |
-| `ts` | string | ISO 8601 タイムスタンプ（UTC） |
+| `ts` | string | ヘルス状態（`state` / `healthy`）が**最後に変化した**時刻（ISO 8601 UTC）。差分スキップにより、状態が安定している間は更新されません。 |
 
 ### `healthy` の判定ロジック
 
@@ -112,7 +121,7 @@
 | `frames_dropped` | int | エンコード失敗でドロップしたフレーム数 |
 | `rtsp_errors` | int | RTSP 送信エラーの累計数 |
 | `reconnect_attempts` | int | RTSP 再接続試行の累計数 |
-| `ts` | string | ISO 8601 タイムスタンプ（UTC） |
+| `ts` | string | このメトリクスが**最後に変化した**時刻（ISO 8601 UTC）。差分スキップにより、フレームカウンタ等が変化しない間（IDLE/STALLED 等）は更新されません。 |
 
 ---
 

@@ -140,10 +140,16 @@ bool MetricsStore::save_metrics(const std::string& path) {
         std::lock_guard<std::mutex> lk(mutex_);
         if (payload == last_metrics_payload_)
             return false;   // unchanged — skip write
-        last_metrics_payload_ = payload;
     }
     // Content changed: rebuild with a fresh timestamp and persist.
-    return write_atomic(path, build_metrics_json(/*with_ts=*/true));
+    // Update the cached payload only after a successful write so that
+    // transient write failures are retried on the next interval.
+    bool ok = write_atomic(path, build_metrics_json(/*with_ts=*/true));
+    if (ok) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        last_metrics_payload_ = payload;
+    }
+    return ok;
 }
 
 bool MetricsStore::save_health(const std::string& path) {
@@ -153,8 +159,14 @@ bool MetricsStore::save_health(const std::string& path) {
         std::lock_guard<std::mutex> lk(mutex_);
         if (payload == last_health_payload_)
             return false;   // unchanged — skip write
-        last_health_payload_ = payload;
     }
     // Content changed: rebuild with a fresh timestamp and persist.
-    return write_atomic(path, build_health_json(/*with_ts=*/true));
+    // Update the cached payload only after a successful write so that
+    // transient write failures are retried on the next interval.
+    bool ok = write_atomic(path, build_health_json(/*with_ts=*/true));
+    if (ok) {
+        std::lock_guard<std::mutex> lk(mutex_);
+        last_health_payload_ = payload;
+    }
+    return ok;
 }

@@ -42,9 +42,12 @@ public:
     uint64_t reconnect_attempts() const { return reconnect_attempts_.load(); }
 
 private:
-    // Build JSON strings.  The `with_ts` variant appends a live "ts" field;
-    // the `without_ts` variant omits it so the result can be used for change
-    // detection without the timestamp masking real diffs.
+    // Build JSON strings.
+    //   with_ts=true  — full output: includes both "ts" (live ISO 8601 timestamp)
+    //                   and "uptime_ms" (time since session start).
+    //   with_ts=false — comparable output: omits "ts" and "uptime_ms" so the
+    //                   result can be used for diff-skip without those
+    //                   continuously-changing fields masking real diffs.
     std::string build_metrics_json(bool with_ts = true) const;
     std::string build_health_json(bool with_ts = true)  const;
 
