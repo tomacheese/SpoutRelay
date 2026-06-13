@@ -93,7 +93,7 @@ static bool try_init_gpu_path(AVCodecContext* ctx,
     }
 
     // 2. HW フレームコンテキストを構築する
-    //    format=D3D11, sw_format=RGBA → DXGI_FORMAT_R8G8B8A8_UNORM
+    //    format=D3D11, sw_format=BGRA → DXGI_FORMAT_B8G8R8A8_UNORM
     AVBufferRef* hw_frm_ctx = av_hwframe_ctx_alloc(hw_dev_ctx);
     if (!hw_frm_ctx) {
         av_buffer_unref(&hw_dev_ctx);
@@ -103,7 +103,10 @@ static bool try_init_gpu_path(AVCodecContext* ctx,
 
     auto* frm_ctx          = reinterpret_cast<AVHWFramesContext*>(hw_frm_ctx->data);
     frm_ctx->format         = AV_PIX_FMT_D3D11;
-    frm_ctx->sw_format      = AV_PIX_FMT_RGBA;
+    // SpoutDX の内部テクスチャは DXGI_FORMAT_B8G8R8A8_UNORM = AV_PIX_FMT_BGRA。
+    // FFmpeg D3D11VA は RGBA を未サポートだが BGRA はサポートしており、
+    // NVENC も BGRA D3D11 テクスチャを直接エンコード可能。
+    frm_ctx->sw_format      = AV_PIX_FMT_BGRA;
     frm_ctx->width          = static_cast<int>(width);
     frm_ctx->height         = static_cast<int>(height);
     frm_ctx->initial_pool_size = 4;  // ラウンドロビン用プール

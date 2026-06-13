@@ -91,10 +91,13 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
     bool ok = false;
 
     if (impl_->gpu_mode) {
-        // GPU ゼロコピーパス: ReceiveTexture() で内部テクスチャを更新し、
-        // ポインタだけを FrameBuffer に格納する（CPU メモリコピーなし）
-        ID3D11Texture2D* tex = nullptr;
-        ok = impl_->receiver.ReceiveTexture(&tex);
+        // GPU ゼロコピーパス:
+        //   ReceiveTexture() (引数なし) で SpoutDX 内部テクスチャ (m_pTexture) を
+        //   更新し、GetSenderTexture() でそのポインタを取得して FrameBuffer に
+        //   格納する。CPU メモリへの読み戻しは発生しない。
+        //   ※ ReceiveTexture(ID3D11Texture2D**) は呼び元で確保済みテクスチャを
+        //      渡す API であり、*ppTexture が null だと false を返すため使用しない。
+        ok = impl_->receiver.ReceiveTexture();
 
         impl_->connected = impl_->receiver.IsConnected();
         if (!ok) return false;
@@ -113,11 +116,16 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
             is_new = impl_->receiver.IsFrameNew();
         }
 
+        // GetSenderTexture() は SpoutDX 内部テクスチャ (BGRA) のポインタを返す。
+        // このポインタは次回 ReceiveTexture() 呼び出しまで有効。
+        ID3D11Texture2D* tex = impl_->receiver.GetSenderTexture();
+
         buf.data.clear();             // GPU パスでは CPU バッファ不要
         buf.gpu_texture = tex;        // EncoderController が CopySubresourceRegion に使用
         buf.width  = w;
         buf.height = h;
-        buf.format = PixelFormat::RGBA;
+        // SpoutDX の内部テクスチャは DXGI_FORMAT_B8G8R8A8_UNORM = BGRA
+        buf.format = PixelFormat::BGRA;
     } else {
         // CPU パス（従来動作）
         size_t required = static_cast<size_t>(w) * h * 4;
