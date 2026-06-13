@@ -580,6 +580,11 @@ void Supervisor::handle_reconfiguring() {
     frame_pump_->start(spout_monitor_, config_.spout.poll_interval_ms);
     last_frame_time_ms_.store(time_utils::now_ms());
     start_encode_thread();
+    // 解像度変更後の再開始を publish_started で明示する。
+    // handle_connecting_output() と同様にテスト・監視系が検出できるようにする。
+    log_->log_publish_started(config_.rtsp.url,
+        static_cast<int>(current_width_), static_cast<int>(current_height_),
+        config_.encoder.fps);
     state_machine_.transition_to(PublisherState::STREAMING);
 }
 
@@ -654,10 +659,25 @@ void Supervisor::handle_stopping() {
 
 bool Supervisor::init_encoder_and_rtsp(uint32_t width, uint32_t height, std::string& error) {
     encoder_ = std::make_unique<EncoderController>();
-    if (!encoder_->init(config_.encoder, width, height, error)) {
+
+    // GPU ゼロコピーパスを試みる: SpoutMonitor が保持する D3D11 デバイスを渡す
+    void* gpu_dev = spout_monitor_ ? spout_monitor_->gpu_device() : nullptr;
+    if (!encoder_->init(config_.encoder, width, height, error, gpu_dev)) {
         log_->log_error("ENCODER_INIT_FAILED", error);
         return false;
     }
+
+    // GPU パスが確立された場合は SpoutMonitor を GPU テクスチャモードに切り替える
+    if (encoder_->gpu_path_active()) {
+        spout_monitor_->set_gpu_mode(true);
+        log_->log_event(spdlog::level::info, "gpu_zero_copy_enabled",
+                        {{"codec", config_.encoder.codec}});
+    } else {
+        spout_monitor_->set_gpu_mode(false);
+        log_->log_event(spdlog::level::info, "gpu_zero_copy_disabled",
+                        {{"codec", config_.encoder.codec}});
+    }
+
     log_->log_encoder_initialized(
         config_.encoder.codec,
         static_cast<int>(width), static_cast<int>(height),
@@ -709,7 +729,9 @@ void Supervisor::encode_publish_thread_func() {
     // 送れるようになる（ScreenRelay PR #6 と同じ修正）。
     FrameBuffer freeze_buf  = std::move(initial_frame_buf_);
     FrameMeta   freeze_meta = initial_frame_meta_;
-    bool        has_freeze  = !freeze_buf.data.empty();
+    // GPU パスでは buf.data が空で gpu_texture のみ設定される。
+    // どちらか一方でも有効ならフリーズフレームとして扱う。
+    bool        has_freeze  = !freeze_buf.data.empty() || freeze_buf.gpu_texture != nullptr;
     initial_frame_meta_ = {};  // メモリ解放（コピー済み）
     bool        content_changed = true;  // sws_scale スキップ判定用
 
@@ -853,6 +875,11 @@ void Supervisor::teardown_encoder() {
         encoder_->reset();
         encoder_.reset();
     }
+    // GPU テクスチャポインタを保持したまま SpoutMonitor が disconnect すると
+    // use-after-free になるため、エンコーダー解体時に必ず CPU パスへ戻す。
+    if (spout_monitor_) spout_monitor_->set_gpu_mode(false);
+    // initial_frame_buf_ が GPU テクスチャポインタを持っている場合もクリアする
+    initial_frame_buf_.gpu_texture = nullptr;
 }
 
 void Supervisor::teardown_rtsp() {

@@ -176,6 +176,11 @@ add_executable(spout_static_sender tests/spout_static_sender/main.cpp)
 target_include_directories(spout_static_sender PRIVATE ${SPOUT2_DX_DIR} ${SPOUT2_GL_DIR})
 target_link_libraries(spout_static_sender PRIVATE spout2_static)
 
+# Resolution-changing sender (E2E RECONFIGURING state / resolution-change tests)
+add_executable(spout_res_changer tests/spout_res_changer/main.cpp)
+target_include_directories(spout_res_changer PRIVATE ${SPOUT2_DX_DIR} ${SPOUT2_GL_DIR})
+target_link_libraries(spout_res_changer PRIVATE spout2_static)
+
 if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()

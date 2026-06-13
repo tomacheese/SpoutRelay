@@ -4,8 +4,13 @@ extern "C" {
 #include <libavutil/opt.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/pixfmt.h>
+#include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_d3d11va.h>
 #include <libswscale/swscale.h>
 }
+
+#include <windows.h>
+#include <d3d11.h>
 
 #include "encoder/encoder_controller.hpp"
 #include <cstring>
@@ -21,6 +26,13 @@ struct EncoderController::Impl {
     std::string      codec_name;
 
     bool             force_next_idr = false;  ///< 次フレームを IDR として強制出力するフラグ
+
+    // --- GPU ゼロコピーパス ---
+    bool             gpu_path     = false;
+    AVBufferRef*     hw_device_ctx = nullptr;
+    AVBufferRef*     hw_frames_ctx = nullptr;
+    AVFrame*         last_hw_frame = nullptr; ///< content_changed=false 時に再利用する HW フレーム
+    ID3D11DeviceContext* d3d_ctx   = nullptr; ///< CopySubresourceRegion 用（借用）
 };
 
 EncoderController::EncoderController()
@@ -46,9 +58,79 @@ static AVPixelFormat pick_pix_fmt(const AVCodec* codec) {
     return fmts[0];
 }
 
+// ---------------------------------------------------------------------------
+// GPU ゼロコピーパス初期化ヘルパー
+// 成功時 true を返し codec_ctx->hw_frames_ctx をセットする。
+// 失敗時は確保済みリソースを解放して false を返す（CPU フォールバック用）。
+// ---------------------------------------------------------------------------
+static bool try_init_gpu_path(AVCodecContext* ctx,
+                              void* raw_device,
+                              uint32_t width, uint32_t height,
+                              AVBufferRef** out_hw_device_ctx,
+                              AVBufferRef** out_hw_frames_ctx,
+                              ID3D11DeviceContext** out_d3d_ctx)
+{
+    auto* d3d11dev = static_cast<ID3D11Device*>(raw_device);
+    if (!d3d11dev) return false;
+
+    // 1. FFmpeg HW デバイスコンテキストを既存の D3D11 デバイスでラップする
+    AVBufferRef* hw_dev_ctx = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA);
+    if (!hw_dev_ctx) return false;
+
+    auto* dev_ctx  = reinterpret_cast<AVHWDeviceContext*>(hw_dev_ctx->data);
+    auto* d3d11ctx = static_cast<AVD3D11VADeviceContext*>(dev_ctx->hwctx);
+
+    d3d11dev->AddRef();               // FFmpeg が Release するため
+    d3d11ctx->device = d3d11dev;
+
+    // D3D11 デバイスコンテキストを取得して保存（CopySubresourceRegion 用）
+    d3d11dev->GetImmediateContext(out_d3d_ctx);
+
+    if (av_hwdevice_ctx_init(hw_dev_ctx) < 0) {
+        av_buffer_unref(&hw_dev_ctx);
+        if (*out_d3d_ctx) { (*out_d3d_ctx)->Release(); *out_d3d_ctx = nullptr; }
+        return false;
+    }
+
+    // 2. HW フレームコンテキストを構築する
+    //    format=D3D11, sw_format=BGRA → DXGI_FORMAT_B8G8R8A8_UNORM
+    AVBufferRef* hw_frm_ctx = av_hwframe_ctx_alloc(hw_dev_ctx);
+    if (!hw_frm_ctx) {
+        av_buffer_unref(&hw_dev_ctx);
+        if (*out_d3d_ctx) { (*out_d3d_ctx)->Release(); *out_d3d_ctx = nullptr; }
+        return false;
+    }
+
+    auto* frm_ctx          = reinterpret_cast<AVHWFramesContext*>(hw_frm_ctx->data);
+    frm_ctx->format         = AV_PIX_FMT_D3D11;
+    // SpoutDX の内部テクスチャは DXGI_FORMAT_B8G8R8A8_UNORM = AV_PIX_FMT_BGRA。
+    // FFmpeg D3D11VA は RGBA を未サポートだが BGRA はサポートしており、
+    // NVENC も BGRA D3D11 テクスチャを直接エンコード可能。
+    frm_ctx->sw_format      = AV_PIX_FMT_BGRA;
+    frm_ctx->width          = static_cast<int>(width);
+    frm_ctx->height         = static_cast<int>(height);
+    frm_ctx->initial_pool_size = 4;  // ラウンドロビン用プール
+
+    if (av_hwframe_ctx_init(hw_frm_ctx) < 0) {
+        av_buffer_unref(&hw_frm_ctx);
+        av_buffer_unref(&hw_dev_ctx);
+        if (*out_d3d_ctx) { (*out_d3d_ctx)->Release(); *out_d3d_ctx = nullptr; }
+        return false;
+    }
+
+    // 3. コーデックコンテキストに HW フレームコンテキストを設定する
+    ctx->hw_frames_ctx = av_buffer_ref(hw_frm_ctx);
+    ctx->pix_fmt       = AV_PIX_FMT_D3D11;
+
+    *out_hw_device_ctx = hw_dev_ctx;
+    *out_hw_frames_ctx = hw_frm_ctx;
+    return true;
+}
+
 bool EncoderController::init(const EncoderConfig& config,
                               uint32_t width, uint32_t height,
-                              std::string& error) {
+                              std::string& error,
+                              void* d3d_device) {
     reset();
     config_ = config;
     width_  = width;
@@ -86,20 +168,37 @@ bool EncoderController::init(const EncoderConfig& config,
         ctx->color_primaries = AVCOL_PRI_BT709;
         ctx->color_trc       = AVCOL_TRC_BT709;
 
+        bool is_hw_codec = (codec_name.find("nvenc") != std::string::npos ||
+                            codec_name.find("amf")   != std::string::npos ||
+                            codec_name.find("qsv")   != std::string::npos);
+
+        // GPU ゼロコピーパスの試行: HW コーデック かつ D3D11 デバイスが利用可能な場合のみ
+        bool gpu_init_ok = false;
+        AVBufferRef* hw_device_ctx_tmp = nullptr;
+        AVBufferRef* hw_frames_ctx_tmp = nullptr;
+        ID3D11DeviceContext* d3d_ctx_tmp = nullptr;
+
+        if (is_hw_codec && d3d_device) {
+            gpu_init_ok = try_init_gpu_path(ctx, d3d_device,
+                                            width, height,
+                                            &hw_device_ctx_tmp,
+                                            &hw_frames_ctx_tmp,
+                                            &d3d_ctx_tmp);
+        }
+
         AVDictionary* opts = nullptr;
-        bool is_nvenc = (codec_name.find("nvenc") != std::string::npos ||
-                         codec_name.find("amf")   != std::string::npos ||
-                         codec_name.find("qsv")   != std::string::npos);
 
         if (!config.preset.empty())
             av_dict_set(&opts, "preset", config.preset.c_str(), 0);
 
-        if (!is_nvenc) {
+        if (!is_hw_codec) {
             // libx264/libx265 accept tune and zerolatency
             if (!config.tune.empty())
                 av_dict_set(&opts, "tune", config.tune.c_str(), 0);
         } else {
-            // NVENC low-latency settings
+            // NVENC/AMF/QSV 低遅延設定
+            // GPU パスでは tune=zerolatency が NVENC と非互換になるケースがあるため
+            // 明示的にスキップする（issue #14 制約）
             av_dict_set(&opts, "rc", "cbr", 0);
             av_dict_set(&opts, "delay", "0", 0);
         }
@@ -108,6 +207,9 @@ bool EncoderController::init(const EncoderConfig& config,
         av_dict_free(&opts);
 
         if (ret < 0) {
+            if (hw_frames_ctx_tmp) av_buffer_unref(&hw_frames_ctx_tmp);
+            if (hw_device_ctx_tmp) av_buffer_unref(&hw_device_ctx_tmp);
+            if (d3d_ctx_tmp)       { d3d_ctx_tmp->Release(); d3d_ctx_tmp = nullptr; }
             avcodec_free_context(&ctx);
             char buf[256];
             av_strerror(ret, buf, sizeof(buf));
@@ -115,9 +217,41 @@ bool EncoderController::init(const EncoderConfig& config,
             continue; // try fallback
         }
 
-        impl_->codec     = codec;
-        impl_->codec_ctx = ctx;
+        impl_->codec      = codec;
+        impl_->codec_ctx  = ctx;
         impl_->codec_name = codec_name;
+
+        if (gpu_init_ok) {
+            // GPU ゼロコピーパス確立
+            impl_->gpu_path       = true;
+            impl_->hw_device_ctx  = hw_device_ctx_tmp;
+            impl_->hw_frames_ctx  = hw_frames_ctx_tmp;
+            impl_->d3d_ctx        = d3d_ctx_tmp;
+            impl_->last_hw_frame  = av_frame_alloc();
+            if (!impl_->last_hw_frame) {
+                reset();
+                error = "av_frame_alloc failed for last_hw_frame (GPU path)";
+                return false;
+            }
+
+            impl_->pkt = av_packet_alloc();
+            if (!impl_->pkt) {
+                reset();
+                error = "av_packet_alloc failed (GPU path)";
+                return false;
+            }
+            impl_->frame_count = 0;
+            return true;
+        }
+
+        // GPU 初期化不要 or 失敗 → CPU パスにフォールバック
+        // hw_frames_ctx は try_init_gpu_path 内で解放済み（失敗時）か
+        // 上で unref 済みなので、ここでは ctx->hw_frames_ctx が残っていれば解放する。
+        if (ctx->hw_frames_ctx) {
+            av_buffer_unref(&ctx->hw_frames_ctx);
+            ctx->hw_frames_ctx = nullptr;
+        }
+        ctx->pix_fmt = pick_pix_fmt(codec);
 
         // SwScale: RGBA → codec pixel format (SpoutDX outputs RGBA with bRGB=false)
         impl_->sws_ctx = sws_getContext(
@@ -211,7 +345,88 @@ bool EncoderController::encode(const FrameBuffer& frame,
                                 const FrameMeta& /*meta*/,
                                 std::vector<EncodedPacket>& out_packets,
                                 bool content_changed) {
-    if (!impl_->codec_ctx || !impl_->sws_ctx || !impl_->yuv_frame) return false;
+    if (!impl_->codec_ctx) return false;
+
+    // --- GPU ゼロコピーパス ---
+    if (impl_->gpu_path) {
+        // gpu_texture が null だが CPU データもない不正フレームはスキップする
+        if (!frame.gpu_texture && frame.data.empty()) return true;
+
+        bool need_copy = (content_changed || impl_->frame_count == 0 ||
+                          !impl_->last_hw_frame ||
+                          !impl_->last_hw_frame->buf[0]);
+
+        if (need_copy) {
+            // プールから新規 HW フレームを取得する
+            AVFrame* hw_frame = av_frame_alloc();
+            if (!hw_frame) return false;
+
+            if (av_hwframe_get_buffer(impl_->hw_frames_ctx, hw_frame, 0) < 0) {
+                av_frame_free(&hw_frame);
+                return false;
+            }
+
+            // D3D11 プールテクスチャを取り出す
+            auto* pool_tex   = reinterpret_cast<ID3D11Texture2D*>(hw_frame->data[0]);
+            auto  pool_index = static_cast<UINT>(reinterpret_cast<intptr_t>(hw_frame->data[1]));
+
+            if (frame.gpu_texture) {
+                // GPU テクスチャが利用可能: CopySubresourceRegion でゼロコピー転送
+                auto* src_tex = static_cast<ID3D11Texture2D*>(frame.gpu_texture);
+                impl_->d3d_ctx->CopySubresourceRegion(
+                    pool_tex, pool_index, 0, 0, 0,
+                    src_tex, 0, nullptr);
+            } else {
+                // CPU フォールバック: UpdateSubresource で CPU データを転送する
+                // (GPU 初期化後・最初の数フレームは gpu_texture が null のことがある)
+                D3D11_BOX box{};
+                box.left   = 0;
+                box.top    = 0;
+                box.front  = 0;
+                box.right  = frame.width;
+                box.bottom = frame.height;
+                box.back   = 1;
+                UINT row_pitch = frame.width * 4;  // RGBA
+                if (row_pitch == 0) {
+                    av_frame_free(&hw_frame);
+                    return false;
+                }
+                impl_->d3d_ctx->UpdateSubresource(
+                    pool_tex, pool_index, &box,
+                    frame.data.data(), row_pitch, 0);
+            }
+
+            // last_hw_frame に保存して content_changed=false 時に再利用する
+            av_frame_unref(impl_->last_hw_frame);
+            if (av_frame_ref(impl_->last_hw_frame, hw_frame) < 0) {
+                av_frame_free(&hw_frame);
+                return false;
+            }
+            av_frame_free(&hw_frame);
+        }
+
+        // エンコード用に last_hw_frame の参照コピーを作成する
+        AVFrame* send_frame = av_frame_alloc();
+        if (!send_frame) return false;
+        if (av_frame_ref(send_frame, impl_->last_hw_frame) < 0) {
+            av_frame_free(&send_frame);
+            return false;
+        }
+
+        send_frame->pts        = impl_->frame_count++;
+        send_frame->pict_type  = impl_->force_next_idr
+            ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
+        impl_->force_next_idr  = false;
+
+        int ret = avcodec_send_frame(impl_->codec_ctx, send_frame);
+        av_frame_free(&send_frame);
+        if (ret < 0) return false;
+
+        return drain_encoder(impl_->codec_ctx, impl_->pkt, out_packets, config_.fps);
+    }
+
+    // --- CPU パス（従来動作）---
+    if (!impl_->sws_ctx || !impl_->yuv_frame) return false;
 
     // ピクセル内容が変化している場合のみ RGBA→YUV 変換 (sws_scale) を実行する。
     //
@@ -258,20 +473,29 @@ bool EncoderController::flush(std::vector<EncodedPacket>& out_packets) {
 }
 
 void EncoderController::reset() {
-    if (impl_->pkt)       { av_packet_free(&impl_->pkt); }
-    if (impl_->yuv_frame) { av_frame_free(&impl_->yuv_frame); }
-    if (impl_->sws_ctx)   { sws_freeContext(impl_->sws_ctx); impl_->sws_ctx = nullptr; }
-    if (impl_->codec_ctx) { avcodec_free_context(&impl_->codec_ctx); }
-    impl_->frame_count   = 0;
+    if (impl_->pkt)           { av_packet_free(&impl_->pkt); }
+    if (impl_->yuv_frame)     { av_frame_free(&impl_->yuv_frame); }
+    if (impl_->sws_ctx)       { sws_freeContext(impl_->sws_ctx); impl_->sws_ctx = nullptr; }
+    if (impl_->last_hw_frame) { av_frame_free(&impl_->last_hw_frame); }
+    if (impl_->hw_frames_ctx) { av_buffer_unref(&impl_->hw_frames_ctx); }
+    if (impl_->hw_device_ctx) { av_buffer_unref(&impl_->hw_device_ctx); }
+    if (impl_->d3d_ctx)       { impl_->d3d_ctx->Release(); impl_->d3d_ctx = nullptr; }
+    if (impl_->codec_ctx)     { avcodec_free_context(&impl_->codec_ctx); }
+    impl_->frame_count    = 0;
     impl_->force_next_idr = false;
     impl_->codec          = nullptr;
     impl_->codec_name.clear();
+    impl_->gpu_path       = false;
     width_  = 0;
     height_ = 0;
 }
 
 void EncoderController::request_next_idr() {
     impl_->force_next_idr = true;
+}
+
+bool EncoderController::gpu_path_active() const {
+    return impl_->gpu_path;
 }
 
 int EncoderController::fps() const {

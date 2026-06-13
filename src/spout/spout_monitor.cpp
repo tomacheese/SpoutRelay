@@ -1,14 +1,16 @@
 #include <windows.h>
+#include <d3d11.h>
 #include <mutex>
 #include "spout/spout_monitor.hpp"
 #include "common/time_utils.hpp"
 #include "SpoutDX.h"
 
 struct SpoutMonitor::Impl {
-    spoutDX  receiver;
+    spoutDX    receiver;
     SenderInfo current_info;
-    bool     connected = false;
-    uint64_t sequence  = 0;
+    bool       connected  = false;
+    uint64_t   sequence   = 0;
+    bool       gpu_mode   = false;  ///< true: ReceiveTexture() パス, false: ReceiveImage() パス
     std::mutex mutex_;
 };
 
@@ -21,6 +23,20 @@ bool SpoutMonitor::init(std::string& error) {
         error = "Failed to initialise DirectX 11 for Spout receiver";
         return false;
     }
+
+    // D3D11 Immediate Context のスレッド安全性を有効化する (ScreenRelay PR #7 由来)。
+    // EncoderController が別スレッドから CopySubresourceRegion を呼び出すため、
+    // ID3D10Multithread インターフェースで排他制御を有効にする。
+    ID3D11Device* device = impl_->receiver.GetDX11Device();
+    if (device) {
+        ID3D10Multithread* mt = nullptr;
+        if (SUCCEEDED(device->QueryInterface(__uuidof(ID3D10Multithread),
+                                             reinterpret_cast<void**>(&mt)))) {
+            mt->SetMultithreadProtected(TRUE);
+            mt->Release();
+        }
+    }
+
     return true;
 }
 
@@ -72,41 +88,93 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
         impl_->current_info.valid  = true;
     }
 
-    size_t required = static_cast<size_t>(w) * h * 4;
-    if (buf.data.size() != required) buf.data.resize(required);
+    bool ok = false;
 
-    // bRGB=false, bInvert=false → RGBA output (raw DX11 texture order)
-    bool ok = impl_->receiver.ReceiveImage(buf.data.data(), w, h, false, false);
+    if (impl_->gpu_mode) {
+        // GPU ゼロコピーパス:
+        //   ReceiveTexture() (引数なし) で SpoutDX 内部テクスチャ (m_pTexture) を
+        //   更新し、GetSenderTexture() でそのポインタを取得して FrameBuffer に
+        //   格納する。CPU メモリへの読み戻しは発生しない。
+        //   ※ ReceiveTexture(ID3D11Texture2D**) は呼び元で確保済みテクスチャを
+        //      渡す API であり、*ppTexture が null だと false を返すため使用しない。
+        ok = impl_->receiver.ReceiveTexture();
 
-    impl_->connected = impl_->receiver.IsConnected();
+        impl_->connected = impl_->receiver.IsConnected();
+        if (!ok) return false;
 
-    if (!ok) return false;
+        // 寸法変更 / 初回接続更新イベントの処理
+        //
+        // ReceiveTexture() (引数なし) は内部で m_bUpdated をリセットするため
+        // IsUpdated() は常に false を返す。そのため IsUpdated() に加えて
+        // GetSenderWidth/Height() を直接比較して寸法変更を確実に検出する。
+        // （ReceiveImage() や ReceiveTexture(ppTexture) は IsUpdated() が機能するが
+        //   ReceiveTexture() 無引数版のみ内部処理でフラグを消費してしまう仕様）
+        {
+            unsigned int nw = impl_->receiver.GetSenderWidth();
+            unsigned int nh = impl_->receiver.GetSenderHeight();
+            bool updated = impl_->receiver.IsUpdated();  // 初回接続時などは true
+            bool dim_changed = (nw && nh && (nw != w || nh != h));
 
-    // Handle dimension changes / first-connection update event
-    if (impl_->receiver.IsUpdated()) {
-        unsigned int nw = impl_->receiver.GetSenderWidth();
-        unsigned int nh = impl_->receiver.GetSenderHeight();
-        impl_->current_info.width  = nw ? nw : w;
-        impl_->current_info.height = nh ? nh : h;
-        impl_->current_info.name   = impl_->receiver.GetSenderName();
-        impl_->current_info.fps    = static_cast<float>(impl_->receiver.GetSenderFps());
-
-        if (nw && nh && (nw != w || nh != h)) {
-            required = static_cast<size_t>(nw) * nh * 4;
-            buf.data.resize(required);
-            // ReceiveImage returns true on updated event; actual pixel copy happens
-            // next call when the buffer matches the new dimensions
-            w = nw; h = nh;
+            if (updated || dim_changed) {
+                impl_->current_info.width  = nw ? nw : w;
+                impl_->current_info.height = nh ? nh : h;
+                impl_->current_info.name   = impl_->receiver.GetSenderName();
+                impl_->current_info.fps    = static_cast<float>(impl_->receiver.GetSenderFps());
+                if (nw && nh && (nw != w || nh != h)) { w = nw; h = nh; }
+                is_new = false;  // 更新イベント: 次回呼び出しで実データ取得
+            } else {
+                is_new = impl_->receiver.IsFrameNew();
+            }
         }
-        // First-connection update: treat as frame-not-yet-new, caller will retry
-        is_new = false;
-    } else {
-        is_new = impl_->receiver.IsFrameNew();
-    }
 
-    buf.width  = w;
-    buf.height = h;
-    buf.format = PixelFormat::RGBA;
+        // GetSenderTexture() は SpoutDX 内部テクスチャ (BGRA) のポインタを返す。
+        // このポインタは次回 ReceiveTexture() 呼び出しまで有効。
+        ID3D11Texture2D* tex = impl_->receiver.GetSenderTexture();
+
+        buf.data.clear();             // GPU パスでは CPU バッファ不要
+        buf.gpu_texture = tex;        // EncoderController が CopySubresourceRegion に使用
+        buf.width  = w;
+        buf.height = h;
+        // SpoutDX の内部テクスチャは DXGI_FORMAT_B8G8R8A8_UNORM = BGRA
+        buf.format = PixelFormat::BGRA;
+    } else {
+        // CPU パス（従来動作）
+        size_t required = static_cast<size_t>(w) * h * 4;
+        if (buf.data.size() != required) buf.data.resize(required);
+
+        // bRGB=false, bInvert=false → RGBA output (raw DX11 texture order)
+        ok = impl_->receiver.ReceiveImage(buf.data.data(), w, h, false, false);
+
+        impl_->connected = impl_->receiver.IsConnected();
+        if (!ok) return false;
+
+        // 寸法変更 / 初回接続更新イベントの処理
+        if (impl_->receiver.IsUpdated()) {
+            unsigned int nw = impl_->receiver.GetSenderWidth();
+            unsigned int nh = impl_->receiver.GetSenderHeight();
+            impl_->current_info.width  = nw ? nw : w;
+            impl_->current_info.height = nh ? nh : h;
+            impl_->current_info.name   = impl_->receiver.GetSenderName();
+            impl_->current_info.fps    = static_cast<float>(impl_->receiver.GetSenderFps());
+
+            if (nw && nh && (nw != w || nh != h)) {
+                required = static_cast<size_t>(nw) * nh * 4;
+                buf.data.resize(required);
+                // ReceiveImage returns true on updated event; actual pixel copy happens
+                // next call when the buffer matches the new dimensions
+                w = nw; h = nh;
+            }
+            // First-connection update: treat as frame-not-yet-new, caller will retry
+            is_new = false;
+        } else {
+            is_new = impl_->receiver.IsFrameNew();
+        }
+
+        buf.gpu_texture = nullptr;  // CPU パスでは GPU テクスチャ不要
+        buf.width  = w;
+        buf.height = h;
+        buf.format = PixelFormat::RGBA;
+    }
 
     meta.width        = w;
     meta.height       = h;
@@ -124,4 +192,14 @@ SenderInfo SpoutMonitor::get_sender_info() const {
 bool SpoutMonitor::is_connected() const {
     std::lock_guard<std::mutex> lock(impl_->mutex_);
     return impl_->connected && impl_->receiver.IsConnected();
+}
+
+void* SpoutMonitor::gpu_device() {
+    std::lock_guard<std::mutex> lock(impl_->mutex_);
+    return static_cast<void*>(impl_->receiver.GetDX11Device());
+}
+
+void SpoutMonitor::set_gpu_mode(bool enabled) {
+    std::lock_guard<std::mutex> lock(impl_->mutex_);
+    impl_->gpu_mode = enabled;
 }

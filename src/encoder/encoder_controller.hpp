@@ -24,9 +24,15 @@ public:
     EncoderController();
     ~EncoderController();
 
+    /// @param d3d_device   SpoutMonitor::gpu_device() が返す型消去済み ID3D11Device* 。
+    ///                     非 null かつコーデックが NVENC/AMF/QSV の場合に GPU
+    ///                     ゼロコピーパスを試みる。GPU 初期化が失敗した場合は
+    ///                     自動的に CPU パスにフォールバックし、エラーにはならない。
+    ///                     nullptr を渡すと常に CPU パスを使用する。
     bool init(const EncoderConfig& config,
               uint32_t width, uint32_t height,
-              std::string& error);
+              std::string& error,
+              void* d3d_device = nullptr);
 
     /**
      * @param content_changed 直前の encode() 呼び出しからピクセル内容が変化している場合は true。
@@ -57,6 +63,11 @@ public:
     uint32_t height() const { return height_; }
     int      fps()    const;
     int      bitrate_kbps() const;
+
+    /// @brief GPU ゼロコピーパスが有効かどうかを返す。
+    ///        true の場合、呼び出し元は SpoutMonitor::set_gpu_mode(true) を
+    ///        呼び出して FrameBuffer.gpu_texture を使うパスに切り替えること。
+    bool gpu_path_active() const;
 
     // Codec parameters for RTSP stream initialisation
     // Caller receives borrowed pointer valid until reset()/destructor
