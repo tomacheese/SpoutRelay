@@ -6,6 +6,9 @@ add_executable(publisher_tests
     unit/test_metrics_store.cpp
     unit/test_backoff.cpp
     unit/test_placeholder_renderer.cpp
+    unit/test_log_sink.cpp
+    unit/test_frame_pump.cpp
+    unit/test_supervisor_logic.cpp
 )
 
 target_link_libraries(publisher_tests PRIVATE publisher_lib)

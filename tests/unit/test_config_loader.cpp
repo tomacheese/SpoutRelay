@@ -145,6 +145,9 @@ extern int run_state_machine_tests();
 extern int run_metrics_tests();
 extern int run_backoff_tests();
 extern int run_placeholder_renderer_tests();
+extern int run_log_sink_tests();
+extern int run_frame_pump_tests();
+extern int run_supervisor_logic_tests();
 
 void test_invalid_rtsp_url_prefix_fails() {
     const std::string json = R"({
@@ -238,6 +241,191 @@ void test_empty_sender_name_fails() {
     printf("[PASS] test_empty_sender_name_fails\n");
 }
 
+// -----------------------------------------------------------------------
+// issue #20 の調査で判明した未テストの検証ルールを網羅する
+// -----------------------------------------------------------------------
+
+void test_fps_over_limit_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender" },
+      "rtsp": { "url": "rtsp://host/path" },
+      "encoder": { "fps": 241, "bitrate_kbps": 4000 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "encoder.fps > 240 should fail validation");
+    printf("[PASS] test_fps_over_limit_fails\n");
+}
+
+void test_non_positive_bitrate_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender" },
+      "rtsp": { "url": "rtsp://host/path" },
+      "encoder": { "fps": 30, "bitrate_kbps": 0 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "encoder.bitrate_kbps <= 0 should fail validation");
+    printf("[PASS] test_non_positive_bitrate_fails\n");
+}
+
+void test_non_positive_poll_interval_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender", "poll_interval_ms": 0 },
+      "rtsp": { "url": "rtsp://host/path" },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "spout.poll_interval_ms <= 0 should fail validation");
+    printf("[PASS] test_non_positive_poll_interval_fails\n");
+}
+
+void test_non_positive_frame_timeout_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender", "frame_timeout_ms": 0 },
+      "rtsp": { "url": "rtsp://host/path" },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "spout.frame_timeout_ms <= 0 should fail validation");
+    printf("[PASS] test_non_positive_frame_timeout_fails\n");
+}
+
+void test_non_positive_connect_timeout_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender" },
+      "rtsp": { "url": "rtsp://host/path", "connect_timeout_ms": 0 },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "rtsp.connect_timeout_ms <= 0 should fail validation");
+    printf("[PASS] test_non_positive_connect_timeout_fails\n");
+}
+
+void test_non_positive_send_timeout_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender" },
+      "rtsp": { "url": "rtsp://host/path", "send_timeout_ms": 0 },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "rtsp.send_timeout_ms <= 0 should fail validation");
+    printf("[PASS] test_non_positive_send_timeout_fails\n");
+}
+
+void test_negative_max_reconnect_attempts_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender" },
+      "rtsp": { "url": "rtsp://host/path", "max_reconnect_attempts": -1 },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "rtsp.max_reconnect_attempts < 0 should fail validation");
+    printf("[PASS] test_negative_max_reconnect_attempts_fails\n");
+}
+
+void test_non_positive_reconnect_delay_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender" },
+      "rtsp": { "url": "rtsp://host/path", "reconnect_delay_ms": 0 },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "rtsp.reconnect_delay_ms <= 0 should fail validation");
+    printf("[PASS] test_non_positive_reconnect_delay_fails\n");
+}
+
+void test_non_positive_reconnect_max_delay_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender" },
+      "rtsp": { "url": "rtsp://host/path", "reconnect_max_delay_ms": 0 },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "rtsp.reconnect_max_delay_ms <= 0 should fail validation");
+    printf("[PASS] test_non_positive_reconnect_max_delay_fails\n");
+}
+
+void test_reconnect_max_delay_less_than_delay_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender" },
+      "rtsp": { "url": "rtsp://host/path", "reconnect_delay_ms": 5000, "reconnect_max_delay_ms": 1000 },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "rtsp.reconnect_max_delay_ms < rtsp.reconnect_delay_ms should fail validation");
+    printf("[PASS] test_reconnect_max_delay_less_than_delay_fails\n");
+}
+
+void test_reconnect_backoff_multiplier_below_one_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender" },
+      "rtsp": { "url": "rtsp://host/path", "reconnect_backoff_multiplier": 0.5 },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "rtsp.reconnect_backoff_multiplier < 1.0 should fail validation");
+    printf("[PASS] test_reconnect_backoff_multiplier_below_one_fails\n");
+}
+
+void test_invalid_placeholder_text_hex_fails() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender" },
+      "rtsp": { "url": "rtsp://192.168.0.100:8554/live" },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 },
+      "placeholder": { "text_hex": "not-a-color" }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(!ok, "Invalid placeholder.text_hex should fail validation");
+    printf("[PASS] test_invalid_placeholder_text_hex_fails\n");
+}
+
 int main() {
     printf("=== Config Loader Tests ===\n");
     test_load_minimal_valid();
@@ -251,11 +439,26 @@ int main() {
     test_load_placeholder_section();
     test_invalid_placeholder_hex_fails();
     test_invalid_placeholder_size_fails();
+    test_fps_over_limit_fails();
+    test_non_positive_bitrate_fails();
+    test_non_positive_poll_interval_fails();
+    test_non_positive_frame_timeout_fails();
+    test_non_positive_connect_timeout_fails();
+    test_non_positive_send_timeout_fails();
+    test_negative_max_reconnect_attempts_fails();
+    test_non_positive_reconnect_delay_fails();
+    test_non_positive_reconnect_max_delay_fails();
+    test_reconnect_max_delay_less_than_delay_fails();
+    test_reconnect_backoff_multiplier_below_one_fails();
+    test_invalid_placeholder_text_hex_fails();
 
     run_state_machine_tests();
     run_metrics_tests();
     run_backoff_tests();
     run_placeholder_renderer_tests();
+    run_log_sink_tests();
+    run_frame_pump_tests();
+    run_supervisor_logic_tests();
 
     printf("\nAll tests passed.\n");
     return 0;

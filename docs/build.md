@@ -117,7 +117,9 @@ publisher/build/
 All tests passed.
 ```
 
-（31 tests: PASSED: 31, FAILED: 0）
+（97 件の `[PASS]` アサーションが出力される）
+
+テストの分類・実行方法の詳細は [docs/testing.md](testing.md) を参照してください。
 
 ## ツールチェーンのカスタマイズ
 

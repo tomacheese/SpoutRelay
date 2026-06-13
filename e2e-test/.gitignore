@@ -2,6 +2,7 @@
 capture/
 logs/
 state/
+cli-tmp/
 
 # mediamtx が生成する TLS 証明書・ログ
 auto.crt
