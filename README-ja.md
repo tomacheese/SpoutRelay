@@ -144,7 +144,7 @@ publisher/
 │   ├── rtsp/         # FFmpeg RTSP ANNOUNCE/RECORD クライアント
 │   └── spout/        # SpoutDX レシーバー（SpoutMonitor）
 ├── tests/
-│   ├── unit/         # カスタムテストランナーによるユニットテスト（31 テスト）
+│   ├── unit/         # カスタムテストランナーによるユニットテスト（97 [PASS] 行）
 │   └── spout_test_sender/  # E2E テスト用カラーサイクル DX11 Spout センダー
 ├── config/
 │   ├── config.example.json
@@ -162,13 +162,16 @@ publisher/
 | [docs/state-machine.md](docs/state-machine.md) | ステートマシン：状態・遷移・エラー処理 |
 | [docs/metrics.md](docs/metrics.md) | メトリクス/ヘルス JSON フォーマット、イベントログ |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | よくあるエラーと解決策 |
+| [docs/testing.md](docs/testing.md) | テスト方法（ユニット/E2E/モンキー/ユーザーテスト） |
 
 ## テストの実行
 
 ```powershell
 build/tests/publisher_tests.exe
-# 期待結果: PASSED: 22, FAILED: 0
+# 期待結果: All tests passed. (97 件の [PASS])
 ```
+
+テストの分類・実行方法の詳細は [docs/testing.md](docs/testing.md) を参照してください。
 
 ## ライセンス
 

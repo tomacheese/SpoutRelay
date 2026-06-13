@@ -1,4 +1,5 @@
 #include "app/supervisor.hpp"
+#include "app/supervisor_logic.hpp"
 #include "common/time_utils.hpp"
 #include <algorithm>
 #include <thread>
@@ -194,9 +195,11 @@ void Supervisor::handle_placeholder() {
         // シームレス移行可能か判定:
         // seamless_handoff_ が true かつ encoder_/RTSP が生存しており解像度も一致
         // していれば、teardown/reinit をスキップして RTSP セッションを維持する。
-        bool can_seamless = seamless_handoff_ &&
-                            encoder_ && rtsp_client_ && rtsp_client_->is_connected() &&
-                            w == current_width_ && h == current_height_;
+        bool can_seamless = supervisor_logic::can_seamless_handoff(
+            seamless_handoff_,
+            static_cast<bool>(encoder_),
+            rtsp_client_ && rtsp_client_->is_connected(),
+            w, h, current_width_, current_height_);
         seamless_handoff_ = false;
 
         if (can_seamless) {
@@ -371,9 +374,11 @@ void Supervisor::handle_connecting_output() {
     // シームレス移行可能か判定:
     // seamless_handoff_ が true かつ encoder_/RTSP が生存しており解像度も一致
     // していれば、teardown/reinit をスキップして RTSP セッションを維持する。
-    bool can_seamless = seamless_handoff_ &&
-                        encoder_ && rtsp_client_ && rtsp_client_->is_connected() &&
-                        source_w == current_width_ && source_h == current_height_;
+    bool can_seamless = supervisor_logic::can_seamless_handoff(
+        seamless_handoff_,
+        static_cast<bool>(encoder_),
+        rtsp_client_ && rtsp_client_->is_connected(),
+        source_w, source_h, current_width_, current_height_);
     seamless_handoff_ = false;
 
     if (can_seamless) {
@@ -764,7 +769,8 @@ void Supervisor::encode_publish_thread_func() {
             log_->log_frame_received(meta.sequence, meta.width, meta.height);
 
             // 解像度変更
-            if (freeze_meta.width != current_width_ || freeze_meta.height != current_height_) {
+            if (supervisor_logic::resolution_changed(
+                    freeze_meta.width, freeze_meta.height, current_width_, current_height_)) {
                 pending_width_.store(freeze_meta.width);
                 pending_height_.store(freeze_meta.height);
                 // 新解像度フレームをスレッド再起動時の初期フリーズフレームとして保存する。
