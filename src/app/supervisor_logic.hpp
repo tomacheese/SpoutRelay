@@ -58,4 +58,25 @@ inline bool resolution_changed(uint32_t frame_width, uint32_t frame_height,
     return frame_width != current_width || frame_height != current_height;
 }
 
+/// @brief handle_connecting_output() の初回フレーム待機ループで、
+///        GPU 接続イベント消費後の最初の ok=true を検出して
+///        タイムアウトタイマーを 1 度だけリセットすべきかどうかを判定する。
+///
+///        GPU ゼロコピーパスでは ReceiveTexture() (無引数) の初回呼び出し時に
+///        内部接続イベント (IsUpdated=true) が消費され、is_new=false になる。
+///        その直後にフレームカウンタが更新されるまでの間は ok=true, is_new=false が
+///        連続する可能性があり、タイマーをリセットし続けると無限ループになるため
+///        初回のみリセットを許可する。
+///
+///        呼び出し側は ok=true かつ is_new=false の場合にのみこの関数を呼ぶこと。
+///        true が返った場合は Stopwatch::reset() を呼び出してよい。
+///
+/// @param source_responded [in/out] 初回 ok=true を受け取り済みかどうかのフラグ
+/// @return タイマーをリセットすべきなら true (初回の ok=true のみ)
+inline bool should_reset_connect_timer_once(bool& source_responded) {
+    if (source_responded) return false;
+    source_responded = true;
+    return true;
+}
+
 } // namespace supervisor_logic

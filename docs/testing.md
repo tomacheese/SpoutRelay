@@ -218,6 +218,11 @@ issue で定義されている「モンキーテスト」は、設計書 (`docs/
 - RTSP サーバー側のタイムアウト設定変更時の挙動 (`connect_timeout_ms`/`send_timeout_ms` の境界値)
 - RTSP サーバー側でのコーデック切替 (例: サーバー再起動で受理コーデックが変わる場合) 時の再接続
 - 極端な解像度 (非常に小さい/大きい解像度、例: 64x64、3840x2160 超) の Spout ソース
+- **GPU モード (`h264_nvenc` + `prefer_dx11: true`) での初回接続成功確認**:
+  実 GPU 環境で `spout-relay.exe` を起動し、既に稼働中の Spout 送信元に接続した際に
+  `logs/*.jsonl` に `SPOUT_RECEIVE_FAILED` が記録されず、直接 `CONNECTING_OUTPUT →
+  STREAMING` へ遷移すること (`ReceiveTexture()` 無引数版の初回接続タイミングずれに
+  起因する黒画面を修正した変更の確認)
 
 これらは実 RTSP サーバーの設定変更や特殊な Spout 送出元が必要になるため、
 対応する `e2e-test/config/` 設定ファイルを用意した上で `spout-relay.exe` を
