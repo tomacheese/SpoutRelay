@@ -99,6 +99,7 @@
   "frames_dropped": 4,
   "rtsp_errors": 0,
   "reconnect_attempts": 0,
+  "device_lost_recoveries": 0,
   "ts": "2026-04-09T22:10:00.000Z"
 }
 ```
@@ -121,6 +122,7 @@
 | `frames_dropped` | int | エンコード失敗でドロップしたフレーム数 |
 | `rtsp_errors` | int | RTSP 送信エラーの累計数 |
 | `reconnect_attempts` | int | RTSP 再接続試行の累計数 |
+| `device_lost_recoveries` | int | GPU TDR デバイスロストから自動回復した累計回数 |
 | `ts` | string | このメトリクスが**最後に変化した**時刻（ISO 8601 UTC）。差分スキップにより、フレームカウンタ等が変化しない間（IDLE/STALLED 等）は更新されません。 |
 
 ---
@@ -182,6 +184,7 @@ logs/<instance_name>.jsonl
 | `SPOUT_INIT_FAILED` | SpoutDX の初期化失敗 |
 | `SPOUT_CONNECT_FAILED` | Spout センダーへの接続失敗 |
 | `SPOUT_RECEIVE_FAILED` | フレーム受信タイムアウト |
+| `SPOUT_REINIT_FAILED` | GPU TDR 後のデバイス再作成失敗 |
 | `ENCODER_INIT_FAILED` | エンコーダー初期化失敗（全コーデック試行後） |
 | `ENCODER_ENCODE_FAILED` | エンコード中のエラー |
 | `RTSP_CONNECT_FAILED` | RTSP サーバーへの接続失敗 |

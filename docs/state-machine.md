@@ -13,6 +13,7 @@
 | `STALLED` | フレームが一定時間届かない（センダー停止の可能性） |
 | `RECONFIGURING` | センダーの解像度変更を検出。エンコーダーを再初期化 |
 | `RECONNECTING_OUTPUT` | RTSP 切断後の再接続待機（バックオフ） |
+| `RECOVERING_DEVICE` | GPU TDR によるデバイスロスト検出後、D3D11 デバイスを再作成中 |
 | `STOPPING` | シャットダウン処理中（Ctrl+C 受信後） |
 | `FATAL` | 回復不能エラー。アプリ終了 |
 
@@ -67,6 +68,12 @@
               │ └───│  RECONFIGURING   │ (解像度変更検出)
               │     └──────────────────┘
               │
+              │     ┌────────────────────┐
+              │     │  RECOVERING_DEVICE │ (GPU TDR 検出)
+              │     └─────────┬──────────┘
+              │               │ 再作成成功 → PROBING へ
+              │               │ 再作成失敗 → FATAL へ
+              │
               │     ┌──────────┐
               └─────│ STOPPING │ (Ctrl+C)
                     └──────────┘
@@ -106,6 +113,11 @@
 | STALLED | PROBING | センダー消失確認 |
 | STALLED | IDLE | センダー消失（長時間 STALLED） |
 | STALLED | STOPPING | シャットダウン要求 |
+| STALLED | RECOVERING_DEVICE | GPU TDR 検出 |
+| STREAMING | RECOVERING_DEVICE | GPU TDR 検出 |
+| RECOVERING_DEVICE | PROBING | デバイス再作成成功 → 再探索へ |
+| RECOVERING_DEVICE | FATAL | デバイス再作成失敗 |
+| RECOVERING_DEVICE | STOPPING | シャットダウン要求 |
 | RECONFIGURING | STREAMING | 再設定成功 |
 | RECONFIGURING | STOPPING | シャットダウン要求 |
 | RECONFIGURING | FATAL | 解像度変更後のエンコーダー再初期化失敗 |
@@ -131,4 +143,42 @@
 | `RTSP_CONNECT_FAILED` | `CONNECTING_OUTPUT` | `RECONNECTING_OUTPUT` |
 | `RTSP_SEND_FAILED` | `STREAMING` | `RECONNECTING_OUTPUT` |
 | `RTSP_TIMEOUT` | `STREAMING` | `RECONNECTING_OUTPUT` |
+| `SPOUT_REINIT_FAILED` | `RECOVERING_DEVICE` | `FATAL` |
 | `FATAL_ERROR` | 任意 | `FATAL` |
+
+## GPU デバイスロスト回復（`RECOVERING_DEVICE`）
+
+GPU の Timeout Detection and Recovery（TDR）が発生すると、NVENC が使用している
+D3D11 デバイスが `DXGI_ERROR_DEVICE_REMOVED` 状態になります。
+
+### 検出方式
+
+Supervisor のメインループが `STREAMING` / `STALLED` 状態のたびに
+`ID3D11Device::GetDeviceRemovedReason()` をポーリングし、`S_OK` 以外であれば
+`RECOVERING_DEVICE` へ遷移します。
+
+また `EncoderController::encode()` の GPU パス先頭でも同じチェックを行い、
+`CopySubresourceRegion()` 前にアクセス違反を防止します。
+
+### 回復フロー
+
+```
+STREAMING / STALLED
+    ↓ GetDeviceRemovedReason() != S_OK
+RECOVERING_DEVICE
+    ↓ teardown_streaming()
+    ↓ SpoutMonitor::reinit_device()
+        CloseDirectX11() → OpenDirectX11() → マルチスレッド保護再設定
+    ↓ 成功
+PROBING → CONNECTING_OUTPUT → STREAMING  （自動復帰）
+    ↓ 失敗
+FATAL
+```
+
+### 関連ログイベント
+
+| イベント | レベル | 説明 |
+|---------|-------|------|
+| `gpu_device_lost` | `warn` | デバイスロスト検出・回復開始 |
+| `gpu_device_reinit_ok` | `info` | デバイス再作成成功 |
+| `SPOUT_REINIT_FAILED` | `error` | デバイス再作成失敗（FATAL へ） |

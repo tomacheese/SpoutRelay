@@ -10,11 +10,12 @@ int run_metrics_tests() {
     {
         // Counters start at zero
         MetricsStore ms;
-        VERIFY(ms.frames_received()    == 0);
-        VERIFY(ms.frames_encoded()     == 0);
-        VERIFY(ms.frames_dropped()     == 0);
-        VERIFY(ms.rtsp_errors()        == 0);
-        VERIFY(ms.reconnect_attempts() == 0);
+        VERIFY(ms.frames_received()        == 0);
+        VERIFY(ms.frames_encoded()         == 0);
+        VERIFY(ms.frames_dropped()         == 0);
+        VERIFY(ms.rtsp_errors()            == 0);
+        VERIFY(ms.reconnect_attempts()     == 0);
+        VERIFY(ms.device_lost_recoveries() == 0);
         printf("[PASS] Counters initialised to zero\n");
     }
 
@@ -27,11 +28,13 @@ int run_metrics_tests() {
         ms.increment_frames_dropped();
         ms.increment_rtsp_errors();
         ms.increment_reconnect_attempts();
-        VERIFY(ms.frames_received()    == 2);
-        VERIFY(ms.frames_encoded()     == 1);
-        VERIFY(ms.frames_dropped()     == 1);
-        VERIFY(ms.rtsp_errors()        == 1);
-        VERIFY(ms.reconnect_attempts() == 1);
+        ms.increment_device_lost_recoveries();
+        VERIFY(ms.frames_received()        == 2);
+        VERIFY(ms.frames_encoded()         == 1);
+        VERIFY(ms.frames_dropped()         == 1);
+        VERIFY(ms.rtsp_errors()            == 1);
+        VERIFY(ms.reconnect_attempts()     == 1);
+        VERIFY(ms.device_lost_recoveries() == 1);
         printf("[PASS] Increment counters work\n");
     }
 
@@ -40,9 +43,11 @@ int run_metrics_tests() {
         MetricsStore ms;
         ms.increment_frames_received();
         ms.increment_frames_encoded();
+        ms.increment_device_lost_recoveries();
         ms.reset_session_counters();
-        VERIFY(ms.frames_received() == 0);
-        VERIFY(ms.frames_encoded()  == 0);
+        VERIFY(ms.frames_received()        == 0);
+        VERIFY(ms.frames_encoded()         == 0);
+        VERIFY(ms.device_lost_recoveries() == 0);
         printf("[PASS] reset_session_counters clears\n");
     }
 
@@ -238,6 +243,29 @@ int run_metrics_tests() {
                    "ts must be present in written metrics.json");
         std::remove(path.c_str());
         printf("[PASS] save_metrics includes uptime_ms and ts in written file\n");
+    }
+
+    {
+        // device_lost_recoveries カウンターが metrics.json に出力されること
+        MetricsStore ms;
+        ms.mark_session_start();
+        ms.set_state("STREAMING");
+        ms.increment_device_lost_recoveries();
+        std::string path = "test_metrics_device_lost_tmp.json";
+
+        bool ok = ms.save_metrics(path);
+        VERIFY_MSG(ok, "save_metrics should succeed");
+
+        std::ifstream f(path);
+        std::string c((std::istreambuf_iterator<char>(f)),
+                       std::istreambuf_iterator<char>());
+        VERIFY_MSG(c.find("\"device_lost_recoveries\"") != std::string::npos,
+                   "device_lost_recoveries must be present in metrics.json");
+        VERIFY(c.find("\"device_lost_recoveries\": 1") != std::string::npos ||
+               c.find("\"device_lost_recoveries\":1") != std::string::npos);
+        f.close();  // Windows では open 中のファイルを std::remove できないため明示的にクローズ
+        std::remove(path.c_str());
+        printf("[PASS] device_lost_recoveries is included in metrics.json\n");
     }
 
     return 0;

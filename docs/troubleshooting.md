@@ -56,6 +56,53 @@ for ($i = 0; $i -lt 10; $i++) {
 
 ---
 
+## GPU TDR（デバイスロスト）関連
+
+### GPU TDR が発生してもクラッシュせず自動復帰する仕組み
+
+GPU 高負荷時に Windows の Timeout Detection and Recovery（TDR）が発動すると、
+NVENC が使用している D3D11 デバイスが `DXGI_ERROR_DEVICE_REMOVED` 状態になります。
+SpoutRelay v0.7 以降はデバイスロストを自動検出し、以下のシーケンスで復帰します:
+
+1. `STREAMING` / `STALLED` 状態でデバイスロストを検出 → `RECOVERING_DEVICE` へ遷移
+2. エンコードスレッド・FramePump・RTSP・エンコーダーを順番に解体
+3. `SpoutDX::CloseDirectX11()` → `OpenDirectX11()` でデバイスを再作成
+4. 成功: `PROBING` → `CONNECTING_OUTPUT` → `STREAMING` と自動復帰
+5. 失敗: `FATAL` へ遷移（アプリ終了）
+
+ログで確認する際は以下のイベントが順に記録されます:
+
+```json
+{"event":"gpu_device_lost", ...}
+{"event":"state_changed","from":"STREAMING","to":"RECOVERING_DEVICE", ...}
+{"event":"gpu_device_reinit_ok", ...}
+{"event":"state_changed","from":"RECOVERING_DEVICE","to":"PROBING", ...}
+...
+{"event":"state_changed","from":"CONNECTING_OUTPUT","to":"STREAMING", ...}
+```
+
+### GPU TDR が頻発する場合の対処
+
+TDR は GPU が長時間（デフォルト 2 秒）応答しない場合に Windows が強制リセットします。
+
+- **GPU 負荷を下げる** — `encoder.bitrate_kbps` を下げる、または `encoder.codec` を
+  `h264_mf`（CPU エンコード）に変更する
+- **TDR タイムアウトを延長する** — レジストリ `HKLM\System\CurrentControlSet\Control\GraphicsDrivers\TdrDelay`
+  を増やす（例: 8 → デフォルトは 2 秒）
+- **ドライバー更新** — 最新の NVIDIA ドライバーへ更新する
+
+### `SPOUT_REINIT_FAILED` が発生してアプリが FATAL になる
+
+デバイス再作成（`OpenDirectX11()`）に失敗した場合に発生します。
+
+**原因・対処:**
+
+- GPU ドライバーが破損している → ドライバーを再インストール
+- GPU が物理的に取り外されている（リモートデスクトップ環境など）
+- アプリを再起動すると通常は回復する
+
+---
+
 ## エンコーダー関連
 
 ### `ENCODER_INIT_FAILED`

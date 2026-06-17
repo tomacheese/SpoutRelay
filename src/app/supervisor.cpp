@@ -62,6 +62,7 @@ void Supervisor::run() {
             case PublisherState::STALLED:            handle_stalled();            break;
             case PublisherState::RECONFIGURING:      handle_reconfiguring();      break;
             case PublisherState::RECONNECTING_OUTPUT:handle_reconnecting_output();break;
+            case PublisherState::RECOVERING_DEVICE:  handle_recovering_device();  break;
             case PublisherState::STOPPING:           handle_stopping();           break;
             case PublisherState::FATAL:
                 log_->log_event(spdlog::level::critical, "fatal_exit", {});
@@ -433,6 +434,17 @@ void Supervisor::handle_streaming() {
         return;
     }
 
+    // encode_error_flag_ より前にデバイスロストを確認する。
+    // TDR 発生時は encode() が false を返して encode_error_flag_ がセットされるが、
+    // デバイスを再作成せずに PROBING → CONNECTING_OUTPUT してもクラッシュが繰り返すため、
+    // RECOVERING_DEVICE 状態を経由してデバイスを再作成してから復帰する。
+    if (spout_monitor_ && spout_monitor_->is_device_removed()) {
+        encode_error_flag_.exchange(false);  // 巻き添えフラグをクリア
+        stop_encode_thread();
+        state_machine_.transition_to(PublisherState::RECOVERING_DEVICE);
+        return;
+    }
+
     if (encode_error_flag_.exchange(false)) {
         stop_encode_thread();
         teardown_streaming();
@@ -477,6 +489,15 @@ void Supervisor::handle_stalled() {
         stop_encode_thread();
         teardown_streaming();
         state_machine_.transition_to(PublisherState::STOPPING);
+        return;
+    }
+
+    // STALLED 中もデバイスロストを確認する。
+    // TDR が STALLED 中に発生した場合も RECOVERING_DEVICE を経由して回復する。
+    if (spout_monitor_ && spout_monitor_->is_device_removed()) {
+        encode_error_flag_.exchange(false);
+        stop_encode_thread();
+        state_machine_.transition_to(PublisherState::RECOVERING_DEVICE);
         return;
     }
 
@@ -555,6 +576,35 @@ void Supervisor::handle_stalled() {
 
     std::this_thread::sleep_for(
         std::chrono::milliseconds(config_.spout.poll_interval_ms));
+}
+
+void Supervisor::handle_recovering_device() {
+    if (shutdown_requested_.load()) {
+        teardown_streaming();
+        state_machine_.transition_to(PublisherState::STOPPING);
+        return;
+    }
+
+    log_->log_event(spdlog::level::warn, "gpu_device_lost", {});
+
+    // エンコードスレッド・FramePump・RTSP・エンコーダーを順番に解体する。
+    // teardown_encoder() が set_gpu_mode(false) を呼ぶため、
+    // GPU テクスチャポインタの use-after-free を防止できる。
+    teardown_streaming();
+
+    // SpoutDX デバイスを再作成する
+    std::string reinit_err;
+    if (!spout_monitor_->reinit_device(reinit_err)) {
+        log_->log_error("SPOUT_REINIT_FAILED", reinit_err);
+        state_machine_.transition_to(PublisherState::FATAL);
+        return;
+    }
+
+    // デバイス再作成成功。PROBING から sender 再接続 → CONNECTING_OUTPUT で
+    // 新デバイスを使ってエンコーダーを再初期化する。
+    metrics_->increment_device_lost_recoveries();
+    log_->log_event(spdlog::level::info, "gpu_device_reinit_ok", {});
+    state_machine_.transition_to(PublisherState::PROBING);
 }
 
 void Supervisor::handle_reconfiguring() {

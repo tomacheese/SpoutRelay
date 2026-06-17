@@ -44,11 +44,12 @@ void MetricsStore::set_encoder_codec(const std::string& codec) {
     encoder_codec_ = codec;
 }
 
-void MetricsStore::increment_frames_received()    { frames_received_.fetch_add(1); }
-void MetricsStore::increment_frames_encoded()     { frames_encoded_.fetch_add(1); }
-void MetricsStore::increment_frames_dropped()     { frames_dropped_.fetch_add(1); }
-void MetricsStore::increment_rtsp_errors()        { rtsp_errors_.fetch_add(1); }
-void MetricsStore::increment_reconnect_attempts() { reconnect_attempts_.fetch_add(1); }
+void MetricsStore::increment_frames_received()        { frames_received_.fetch_add(1); }
+void MetricsStore::increment_frames_encoded()         { frames_encoded_.fetch_add(1); }
+void MetricsStore::increment_frames_dropped()         { frames_dropped_.fetch_add(1); }
+void MetricsStore::increment_rtsp_errors()            { rtsp_errors_.fetch_add(1); }
+void MetricsStore::increment_reconnect_attempts()     { reconnect_attempts_.fetch_add(1); }
+void MetricsStore::increment_device_lost_recoveries() { device_lost_recoveries_.fetch_add(1); }
 
 void MetricsStore::reset_session_counters() {
     frames_received_.store(0);
@@ -56,6 +57,7 @@ void MetricsStore::reset_session_counters() {
     frames_dropped_.store(0);
     rtsp_errors_.store(0);
     reconnect_attempts_.store(0);
+    device_lost_recoveries_.store(0);
 }
 
 void MetricsStore::mark_session_start() {
@@ -84,11 +86,12 @@ std::string MetricsStore::build_metrics_json(bool with_ts) const {
             j["uptime_ms"] = uptime_ms;
         }
     }
-    j["frames_received"]    = frames_received_.load();
-    j["frames_encoded"]     = frames_encoded_.load();
-    j["frames_dropped"]     = frames_dropped_.load();
-    j["rtsp_errors"]        = rtsp_errors_.load();
-    j["reconnect_attempts"] = reconnect_attempts_.load();
+    j["frames_received"]         = frames_received_.load();
+    j["frames_encoded"]          = frames_encoded_.load();
+    j["frames_dropped"]          = frames_dropped_.load();
+    j["rtsp_errors"]             = rtsp_errors_.load();
+    j["reconnect_attempts"]      = reconnect_attempts_.load();
+    j["device_lost_recoveries"]  = device_lost_recoveries_.load();
     if (with_ts)
         j["ts"] = time_utils::iso8601_now();
     return j.dump(2);
