@@ -410,5 +410,86 @@ int run_state_machine_tests() {
         printf("[PASS] STOPPING → IDLE\n");
     }
 
+    // -----------------------------------------------------------------
+    // issue #26: RECOVERING_DEVICE 遷移テスト
+    // -----------------------------------------------------------------
+
+    {
+        // STREAMING → RECOVERING_DEVICE (GPU TDR 発生時)
+        StateMachine sm;
+        sm.transition_to(PublisherState::IDLE);
+        sm.transition_to(PublisherState::PROBING);
+        sm.transition_to(PublisherState::CONNECTING_OUTPUT);
+        sm.transition_to(PublisherState::STREAMING);
+        bool ok = sm.transition_to(PublisherState::RECOVERING_DEVICE);
+        VERIFY_MSG(ok, "STREAMING → RECOVERING_DEVICE should succeed");
+        VERIFY(sm.current_state() == PublisherState::RECOVERING_DEVICE);
+        printf("[PASS] STREAMING → RECOVERING_DEVICE\n");
+    }
+
+    {
+        // STALLED → RECOVERING_DEVICE (STALLED 中に GPU TDR 発生)
+        StateMachine sm;
+        sm.transition_to(PublisherState::IDLE);
+        sm.transition_to(PublisherState::PROBING);
+        sm.transition_to(PublisherState::CONNECTING_OUTPUT);
+        sm.transition_to(PublisherState::STREAMING);
+        sm.transition_to(PublisherState::STALLED);
+        bool ok = sm.transition_to(PublisherState::RECOVERING_DEVICE);
+        VERIFY_MSG(ok, "STALLED → RECOVERING_DEVICE should succeed");
+        VERIFY(sm.current_state() == PublisherState::RECOVERING_DEVICE);
+        printf("[PASS] STALLED → RECOVERING_DEVICE\n");
+    }
+
+    {
+        // RECOVERING_DEVICE → PROBING (デバイス再作成成功 → 再探索・再接続)
+        StateMachine sm;
+        sm.transition_to(PublisherState::IDLE);
+        sm.transition_to(PublisherState::PROBING);
+        sm.transition_to(PublisherState::CONNECTING_OUTPUT);
+        sm.transition_to(PublisherState::STREAMING);
+        sm.transition_to(PublisherState::RECOVERING_DEVICE);
+        bool ok = sm.transition_to(PublisherState::PROBING);
+        VERIFY_MSG(ok, "RECOVERING_DEVICE → PROBING should succeed");
+        printf("[PASS] RECOVERING_DEVICE → PROBING\n");
+    }
+
+    {
+        // RECOVERING_DEVICE → FATAL (デバイス再作成失敗)
+        StateMachine sm;
+        sm.transition_to(PublisherState::IDLE);
+        sm.transition_to(PublisherState::PROBING);
+        sm.transition_to(PublisherState::CONNECTING_OUTPUT);
+        sm.transition_to(PublisherState::STREAMING);
+        sm.transition_to(PublisherState::RECOVERING_DEVICE);
+        bool ok = sm.transition_to(PublisherState::FATAL);
+        VERIFY_MSG(ok, "RECOVERING_DEVICE → FATAL should succeed");
+        VERIFY(sm.current_state() == PublisherState::FATAL);
+        printf("[PASS] RECOVERING_DEVICE → FATAL\n");
+    }
+
+    {
+        // RECOVERING_DEVICE → STOPPING (回復中にシャットダウン要求)
+        StateMachine sm;
+        sm.transition_to(PublisherState::IDLE);
+        sm.transition_to(PublisherState::PROBING);
+        sm.transition_to(PublisherState::CONNECTING_OUTPUT);
+        sm.transition_to(PublisherState::STREAMING);
+        sm.transition_to(PublisherState::RECOVERING_DEVICE);
+        bool ok = sm.transition_to(PublisherState::STOPPING);
+        VERIFY_MSG(ok, "RECOVERING_DEVICE → STOPPING should succeed");
+        printf("[PASS] RECOVERING_DEVICE → STOPPING\n");
+    }
+
+    {
+        // 不正遷移: IDLE → RECOVERING_DEVICE は拒否される
+        StateMachine sm;
+        sm.transition_to(PublisherState::IDLE);
+        bool ok = sm.transition_to(PublisherState::RECOVERING_DEVICE);
+        VERIFY_MSG(!ok, "IDLE → RECOVERING_DEVICE must be rejected");
+        VERIFY(sm.current_state() == PublisherState::IDLE);
+        printf("[PASS] Invalid IDLE → RECOVERING_DEVICE rejected\n");
+    }
+
     return 0;
 }

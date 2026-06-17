@@ -11,23 +11,21 @@ struct SpoutMonitor::Impl {
     bool       connected  = false;
     uint64_t   sequence   = 0;
     bool       gpu_mode   = false;  ///< true: ReceiveTexture() パス, false: ReceiveImage() パス
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
 };
 
 SpoutMonitor::SpoutMonitor()  : impl_(std::make_unique<Impl>()) {}
 SpoutMonitor::~SpoutMonitor() { disconnect(); }
 
-bool SpoutMonitor::init(std::string& error) {
-    impl_->receiver.SetAdapterAuto(true); // auto-switch to sender's GPU adapter
-    if (!impl_->receiver.OpenDirectX11()) {
-        error = "Failed to initialise DirectX 11 for Spout receiver";
-        return false;
-    }
-
+/// @brief D3D11 Immediate Context のマルチスレッド保護を有効にする。
+///        init() と reinit_device() の両方から呼び出す共通ヘルパー。
+///        init() はシングルスレッド起動中にロックなしで呼び出す。
+///        reinit_device() は impl_->mutex_ 保持済みの状態で呼び出す。
+static void setup_device_mt_protection(spoutDX& receiver) {
     // D3D11 Immediate Context のスレッド安全性を有効化する (ScreenRelay PR #7 由来)。
     // EncoderController が別スレッドから CopySubresourceRegion を呼び出すため、
     // ID3D10Multithread インターフェースで排他制御を有効にする。
-    ID3D11Device* device = impl_->receiver.GetDX11Device();
+    ID3D11Device* device = receiver.GetDX11Device();
     if (device) {
         ID3D10Multithread* mt = nullptr;
         if (SUCCEEDED(device->QueryInterface(__uuidof(ID3D10Multithread),
@@ -36,7 +34,16 @@ bool SpoutMonitor::init(std::string& error) {
             mt->Release();
         }
     }
+}
 
+bool SpoutMonitor::init(std::string& error) {
+    impl_->receiver.SetAdapterAuto(true); // auto-switch to sender's GPU adapter
+    if (!impl_->receiver.OpenDirectX11()) {
+        error = "Failed to initialise DirectX 11 for Spout receiver";
+        return false;
+    }
+
+    setup_device_mt_protection(impl_->receiver);
     return true;
 }
 
@@ -91,6 +98,14 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
     bool ok = false;
 
     if (impl_->gpu_mode) {
+        // デバイスロスト時は ReceiveTexture() を呼ばずに早期リターンする。
+        // 死んだデバイスへの SpoutDX 呼び出しはアクセス違反を引き起こす可能性がある。
+        {
+            ID3D11Device* dev = impl_->receiver.GetDX11Device();
+            if (dev && dev->GetDeviceRemovedReason() != S_OK)
+                return false;
+        }
+
         // GPU ゼロコピーパス:
         //   ReceiveTexture() (引数なし) で SpoutDX 内部テクスチャ (m_pTexture) を
         //   更新し、GetSenderTexture() でそのポインタを取得して FrameBuffer に
@@ -202,4 +217,29 @@ void* SpoutMonitor::gpu_device() {
 void SpoutMonitor::set_gpu_mode(bool enabled) {
     std::lock_guard<std::mutex> lock(impl_->mutex_);
     impl_->gpu_mode = enabled;
+}
+
+bool SpoutMonitor::is_device_removed() const {
+    std::lock_guard<std::mutex> lock(impl_->mutex_);
+    ID3D11Device* dev = impl_->receiver.GetDX11Device();
+    if (!dev) return false;
+    return dev->GetDeviceRemovedReason() != S_OK;
+}
+
+bool SpoutMonitor::reinit_device(std::string& error) {
+    std::lock_guard<std::mutex> lock(impl_->mutex_);
+    // 既存の受信セッションとデバイスを破棄する
+    impl_->receiver.ReleaseReceiver();
+    impl_->receiver.CloseDirectX11();
+    impl_->connected      = false;
+    impl_->current_info   = SenderInfo{};
+    impl_->gpu_mode       = false;  // CPU パスへ戻し、再初期化後に Supervisor が再設定する
+
+    // D3D11 デバイスを再作成する
+    if (!impl_->receiver.OpenDirectX11()) {
+        error = "Failed to re-create DirectX 11 device after device loss";
+        return false;
+    }
+    setup_device_mt_protection(impl_->receiver);
+    return true;
 }

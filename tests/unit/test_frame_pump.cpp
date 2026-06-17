@@ -31,6 +31,8 @@ public:
     bool is_connected() const override { return true; }
     void* gpu_device() override { return nullptr; }
     void set_gpu_mode(bool /*enabled*/) override {}
+    bool is_device_removed() const override { return false; }
+    bool reinit_device(std::string& /*error*/) override { return true; }
 
 private:
     uint64_t sequence_ = 0;

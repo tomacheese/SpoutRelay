@@ -31,6 +31,7 @@ private:
     void handle_stalled();
     void handle_reconfiguring();
     void handle_reconnecting_output();
+    void handle_recovering_device();
     void handle_stopping();
 
     void metrics_writer_thread_func();

@@ -33,6 +33,7 @@ struct EncoderController::Impl {
     AVBufferRef*     hw_frames_ctx = nullptr;
     AVFrame*         last_hw_frame = nullptr; ///< content_changed=false 時に再利用する HW フレーム
     ID3D11DeviceContext* d3d_ctx   = nullptr; ///< CopySubresourceRegion 用（借用）
+    ID3D11Device*    d3d_device    = nullptr; ///< デバイスロスト検出用（AddRef 保持）
 };
 
 EncoderController::EncoderController()
@@ -227,6 +228,13 @@ bool EncoderController::init(const EncoderConfig& config,
             impl_->hw_device_ctx  = hw_device_ctx_tmp;
             impl_->hw_frames_ctx  = hw_frames_ctx_tmp;
             impl_->d3d_ctx        = d3d_ctx_tmp;
+            // デバイスロスト検出用にポインタを AddRef して保持する。
+            // reset() で Release する。
+            auto* d3d11dev = static_cast<ID3D11Device*>(d3d_device);
+            if (d3d11dev) {
+                d3d11dev->AddRef();
+                impl_->d3d_device = d3d11dev;
+            }
             impl_->last_hw_frame  = av_frame_alloc();
             if (!impl_->last_hw_frame) {
                 reset();
@@ -349,6 +357,13 @@ bool EncoderController::encode(const FrameBuffer& frame,
 
     // --- GPU ゼロコピーパス ---
     if (impl_->gpu_path) {
+        // CopySubresourceRegion の前にデバイスロストを確認する。
+        // デバイスロスト時はアクセス違反が発生する前に安全に脱出する。
+        if (impl_->d3d_device &&
+            impl_->d3d_device->GetDeviceRemovedReason() != S_OK) {
+            return false;
+        }
+
         // gpu_texture が null だが CPU データもない不正フレームはスキップする
         if (!frame.gpu_texture && frame.data.empty()) return true;
 
@@ -480,6 +495,7 @@ void EncoderController::reset() {
     if (impl_->hw_frames_ctx) { av_buffer_unref(&impl_->hw_frames_ctx); }
     if (impl_->hw_device_ctx) { av_buffer_unref(&impl_->hw_device_ctx); }
     if (impl_->d3d_ctx)       { impl_->d3d_ctx->Release(); impl_->d3d_ctx = nullptr; }
+    if (impl_->d3d_device)    { impl_->d3d_device->Release(); impl_->d3d_device = nullptr; }
     if (impl_->codec_ctx)     { avcodec_free_context(&impl_->codec_ctx); }
     impl_->frame_count    = 0;
     impl_->force_next_idr = false;

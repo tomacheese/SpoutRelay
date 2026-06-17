@@ -22,6 +22,7 @@ public:
     void increment_frames_dropped();
     void increment_rtsp_errors();
     void increment_reconnect_attempts();
+    void increment_device_lost_recoveries();
 
     void reset_session_counters();
     void mark_session_start();
@@ -35,11 +36,12 @@ public:
     bool save_health(const std::string& path);
 
     // Read-only snapshot values
-    uint64_t frames_received()    const { return frames_received_.load(); }
-    uint64_t frames_encoded()     const { return frames_encoded_.load(); }
-    uint64_t frames_dropped()     const { return frames_dropped_.load(); }
-    uint64_t rtsp_errors()        const { return rtsp_errors_.load(); }
-    uint64_t reconnect_attempts() const { return reconnect_attempts_.load(); }
+    uint64_t frames_received()         const { return frames_received_.load(); }
+    uint64_t frames_encoded()          const { return frames_encoded_.load(); }
+    uint64_t frames_dropped()          const { return frames_dropped_.load(); }
+    uint64_t rtsp_errors()             const { return rtsp_errors_.load(); }
+    uint64_t reconnect_attempts()      const { return reconnect_attempts_.load(); }
+    uint64_t device_lost_recoveries()  const { return device_lost_recoveries_.load(); }
 
 private:
     // Build JSON strings.
@@ -56,6 +58,7 @@ private:
     std::atomic<uint64_t> frames_dropped_{0};
     std::atomic<uint64_t> rtsp_errors_{0};
     std::atomic<uint64_t> reconnect_attempts_{0};
+    std::atomic<uint64_t> device_lost_recoveries_{0};
 
     mutable std::mutex mutex_;
     std::string current_state_;

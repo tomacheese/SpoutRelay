@@ -28,6 +28,19 @@ public:
     ///        ポインタをセットする（buf.data は空のまま）。
     ///        無効時は従来の CPU コピーパスを使用する。
     virtual void set_gpu_mode(bool enabled) = 0;
+
+    // --- GPU デバイスロスト回復パス用 ---
+
+    /// @brief D3D11 デバイスがロスト状態かどうかを確認する。
+    ///        GPU TDR 発生時に DXGI_ERROR_DEVICE_REMOVED を検出するために使用する。
+    ///        init() 前または デバイス未取得時は false を返す。
+    virtual bool is_device_removed() const = 0;
+
+    /// @brief D3D11 デバイスを再作成する（GPU TDR 回復用）。
+    ///        CloseDirectX11() → OpenDirectX11() でデバイスを再構築し、
+    ///        マルチスレッド保護を再設定する。
+    ///        成功時 true、失敗時は error にメッセージを格納して false を返す。
+    virtual bool reinit_device(std::string& error) = 0;
 };
 
 class SpoutMonitor : public ISpoutMonitor {
@@ -44,6 +57,8 @@ public:
     bool is_connected() const override;
     void* gpu_device() override;
     void set_gpu_mode(bool enabled) override;
+    bool is_device_removed() const override;
+    bool reinit_device(std::string& error) override;
 
 private:
     struct Impl;

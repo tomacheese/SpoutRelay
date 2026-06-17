@@ -14,6 +14,7 @@ enum class PublisherState {
     STALLED,
     RECONFIGURING,
     RECONNECTING_OUTPUT,
+    RECOVERING_DEVICE,
     STOPPING,
     FATAL
 };
@@ -29,6 +30,7 @@ inline const char* state_name(PublisherState s) {
         case PublisherState::STALLED:            return "STALLED";
         case PublisherState::RECONFIGURING:      return "RECONFIGURING";
         case PublisherState::RECONNECTING_OUTPUT:return "RECONNECTING_OUTPUT";
+        case PublisherState::RECOVERING_DEVICE:  return "RECOVERING_DEVICE";
         case PublisherState::STOPPING:           return "STOPPING";
         case PublisherState::FATAL:              return "FATAL";
         default:                                 return "UNKNOWN";
