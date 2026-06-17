@@ -98,5 +98,37 @@ int run_supervisor_logic_tests() {
         printf("[PASS] resolution_changed: height differs only\n");
     }
 
+    // --- should_reset_connect_timer_once -------------------------------------
+
+    {
+        // 初回 (source_responded=false) は true を返しフラグを true にセットする
+        bool source_responded = false;
+        bool result = should_reset_connect_timer_once(source_responded);
+        VERIFY_MSG(result, "first call should return true");
+        VERIFY_MSG(source_responded, "source_responded must be set to true after first call");
+        printf("[PASS] should_reset_connect_timer_once: first call returns true\n");
+    }
+
+    {
+        // 2 回目以降 (source_responded=true) は false を返す (無限ループ防止)
+        bool source_responded = true;
+        bool result = should_reset_connect_timer_once(source_responded);
+        VERIFY_MSG(!result, "subsequent call should return false");
+        VERIFY_MSG(source_responded, "source_responded must remain true");
+        printf("[PASS] should_reset_connect_timer_once: subsequent call returns false\n");
+    }
+
+    {
+        // 同一フラグで連続呼び出し: 1 回目のみ true、2 回目以降は false
+        bool source_responded = false;
+        bool first  = should_reset_connect_timer_once(source_responded);
+        bool second = should_reset_connect_timer_once(source_responded);
+        bool third  = should_reset_connect_timer_once(source_responded);
+        VERIFY_MSG(first,   "first call must be true");
+        VERIFY_MSG(!second, "second call must be false");
+        VERIFY_MSG(!third,  "third call must be false");
+        printf("[PASS] should_reset_connect_timer_once: only first of repeated calls is true\n");
+    }
+
     return 0;
 }

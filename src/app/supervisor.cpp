@@ -337,12 +337,17 @@ void Supervisor::handle_connecting_output() {
     FrameMeta   meta;
     bool is_new = false;
     time_utils::Stopwatch wait;
+    bool source_responded = false;
 
     while (!is_new && !shutdown_requested_.load()) {
-        if (spout_monitor_->receive_latest_frame(buf, meta, is_new)) {
+        bool ok = spout_monitor_->receive_latest_frame(buf, meta, is_new);
+        if (ok) {
             if (is_new) break;
+            if (supervisor_logic::should_reset_connect_timer_once(source_responded)) {
+                wait.reset();
+            }
         }
-        if (wait.expired(config_.spout.frame_timeout_ms * 5)) {
+        if (wait.expired(static_cast<int64_t>(config_.spout.frame_timeout_ms) * 5)) {
             log_->log_error("SPOUT_RECEIVE_FAILED", "Timeout waiting for first frame");
             spout_monitor_->disconnect();
             state_machine_.transition_to(PublisherState::PROBING);
