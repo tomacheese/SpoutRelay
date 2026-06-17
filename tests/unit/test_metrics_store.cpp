@@ -263,6 +263,7 @@ int run_metrics_tests() {
                    "device_lost_recoveries must be present in metrics.json");
         VERIFY(c.find("\"device_lost_recoveries\": 1") != std::string::npos ||
                c.find("\"device_lost_recoveries\":1") != std::string::npos);
+        f.close();  // Windows では open 中のファイルを std::remove できないため明示的にクローズ
         std::remove(path.c_str());
         printf("[PASS] device_lost_recoveries is included in metrics.json\n");
     }
