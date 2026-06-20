@@ -8,6 +8,9 @@
 struct SpoutMonitor::Impl {
     spoutDX    receiver;
     SenderInfo current_info;
+    /// connect() が呼ばれ disconnect() がまだ呼ばれていないことを示すフラグ。
+    /// receive_latest_frame() 内では更新しない。センダーの実接続状態は
+    /// receiver.IsConnected() で確認し、is_connected() は両方を AND する。
     bool       connected  = false;
     uint64_t   sequence   = 0;
     bool       gpu_mode   = false;  ///< true: ReceiveTexture() パス, false: ReceiveImage() パス
@@ -114,7 +117,12 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
         //      渡す API であり、*ppTexture が null だと false を返すため使用しない。
         ok = impl_->receiver.ReceiveTexture();
 
-        impl_->connected = impl_->receiver.IsConnected();
+        // impl_->connected はここで更新しない。
+        // impl_->connected = impl_->receiver.IsConnected() とすると、センダーが一時切断した際に
+        // false になり、復帰後も receive_latest_frame() 冒頭のガードで弾かれ続ける。
+        // SetReceiverName() 済みの SpoutDX は ReceiveTexture() を再呼び出しすれば
+        // センダー復帰を自動検出できるため、ここでは connected を変更しない。
+        // センダー消失の検出は last_source_alive_ms() の停滞を使う Supervisor 側で行う。
         if (!ok) return false;
 
         // 寸法変更 / 初回接続更新イベントの処理
@@ -167,7 +175,9 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
         // bRGB=false, bInvert=false → RGBA output (raw DX11 texture order)
         ok = impl_->receiver.ReceiveImage(buf.data.data(), w, h, false, false);
 
-        impl_->connected = impl_->receiver.IsConnected();
+        // impl_->connected はここで更新しない (GPU パスと同理由)。
+        // センダーが一時切断→復帰した場合でも ReceiveImage() は再呼び出しで
+        // 自動再接続するため、connected フラグを false に倒してはいけない。
         if (!ok) return false;
 
         // 寸法変更 / 初回接続更新イベントの処理
