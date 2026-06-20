@@ -41,6 +41,7 @@ jobs:
 
     steps:
       - name: 🛎 Checkout
+        id: checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           # マージ済みの場合は base ブランチ (master)、未マージの場合は PR ヘッド SHA を使う
@@ -57,6 +58,10 @@ jobs:
           custom_release_rules: "feat:minor:✨ Features,fix:patch:🐛 Fixes,docs:patch:📰 Docs,chore:patch:🎨 Chore,pref:patch:🎈 Performance improvements,refactor:patch:🧹 Refactoring,build:patch:🔍 Build,ci:patch:🔍 CI,revert:patch:⏪ Revert,style:patch:🧹 Style,test:patch:👀 Test,release:major:📦 Release"
           # マージ済みの場合のみ実際にタグを作成する（PR 中はドライラン）
           dry_run: ${{ github.event.pull_request.merged == true && 'false' || 'true' }}
+          # pull_request_target の GITHUB_SHA は merge 後の master HEAD を指さないことがあり、
+          # それが原因で v0.8.0 がマージ前のコミットに発行された (2026-06-20)。
+          # 実際に checkout したコミットを明示して根本的に防ぐ。
+          commit_sha: ${{ steps.checkout.outputs.commit }}
 
   cpp-build:
     name: 🏗️ Build & Test (Windows / MinGW64)
