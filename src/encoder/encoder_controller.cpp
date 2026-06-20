@@ -189,12 +189,12 @@ bool EncoderController::init(const EncoderConfig& config,
         if (is_hw_codec && d3d_device) {
             // センダーの DXGI フォーマットに合わせて GPU プールの sw_format を選択する。
             // CopySubresourceRegion はフォーマット不一致時に戻り値もエラーも返さず無音で失敗するため、
-            // センダーが RGBA (28=DXGI_FORMAT_R8G8B8A8_UNORM) なら AV_PIX_FMT_RGBA を試みる。
+            // センダーが DXGI_FORMAT_R8G8B8A8_UNORM (RGBA) なら AV_PIX_FMT_RGBA を試みる。
             // AV_PIX_FMT_RGBA が FFmpeg D3D11VA で未サポートの場合は av_hwframe_ctx_init() が
             // 失敗し、以下のブロックで CPU パスへ自動フォールバックする。
-            // 0 (未指定) または 87 (B8G8R8A8_UNORM) は従来通り AV_PIX_FMT_BGRA を使用する。
+            // 0 (未指定) または DXGI_FORMAT_B8G8R8A8_UNORM は従来通り AV_PIX_FMT_BGRA を使用する。
             AVPixelFormat gpu_sw_fmt = AV_PIX_FMT_BGRA;  // デフォルト: BGRA
-            if (sender_dxgi_format == 28) {               // DXGI_FORMAT_R8G8B8A8_UNORM
+            if (sender_dxgi_format == DXGI_FORMAT_R8G8B8A8_UNORM) {
                 gpu_sw_fmt = AV_PIX_FMT_RGBA;
             }
 

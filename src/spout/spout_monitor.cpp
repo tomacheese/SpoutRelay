@@ -153,12 +153,12 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
         buf.gpu_texture = tex;        // EncoderController が CopySubresourceRegion に使用
         buf.width  = w;
         buf.height = h;
-        // 28 = DXGI_FORMAT_R8G8B8A8_UNORM (RGBA)、87 = DXGI_FORMAT_B8G8R8A8_UNORM (BGRA)
         // EncoderController のフォーマット選択ロジック (encoder_controller.cpp) と方向を揃える:
-        //   RGBA (28) → PixelFormat::RGBA、それ以外 (87=BGRA および未知フォーマット) → PixelFormat::BGRA
+        //   DXGI_FORMAT_R8G8B8A8_UNORM (RGBA) → PixelFormat::RGBA
+        //   それ以外 (DXGI_FORMAT_B8G8R8A8_UNORM=BGRA および未知フォーマット) → PixelFormat::BGRA
         // ※ 未知フォーマットは BGRA 扱いとすることで encoder 側デフォルトと一致させる。
         const DWORD dxgi_fmt = impl_->receiver.GetSenderFormat();
-        buf.format = (dxgi_fmt == 28) ? PixelFormat::RGBA : PixelFormat::BGRA;
+        buf.format = (dxgi_fmt == DXGI_FORMAT_R8G8B8A8_UNORM) ? PixelFormat::RGBA : PixelFormat::BGRA;
     } else {
         // CPU パス（従来動作）
         size_t required = static_cast<size_t>(w) * h * 4;
@@ -229,9 +229,10 @@ void SpoutMonitor::set_gpu_mode(bool enabled) {
 uint32_t SpoutMonitor::get_sender_dxgi_format() const {
     std::lock_guard<std::mutex> lock(impl_->mutex_);
     // GetSenderFormat() は DXGI_FORMAT を DWORD で返す。
-    // 接続前は BGRA (87) がデフォルト値として返ることが多いが、未接続時は 0 を返す実装もある。
-    // supervisor.cpp から encoder 初期化前に呼ぶのはセンダー接続後(connect()済み)を前提とする。
-    if (!impl_->connected) return 0;
+    // connect() は impl_->connected=true にするだけで実接続前でも true になり得るため、
+    // is_connected() と同様に receiver.IsConnected() も確認することで、
+    // 未接続状態での GetSenderFormat() のデフォルト値/前回値の混入を防ぐ。
+    if (!impl_->connected || !impl_->receiver.IsConnected()) return 0;
     return static_cast<uint32_t>(impl_->receiver.GetSenderFormat());
 }
 
