@@ -69,7 +69,8 @@ static bool try_init_gpu_path(AVCodecContext* ctx,
                               uint32_t width, uint32_t height,
                               AVBufferRef** out_hw_device_ctx,
                               AVBufferRef** out_hw_frames_ctx,
-                              ID3D11DeviceContext** out_d3d_ctx)
+                              ID3D11DeviceContext** out_d3d_ctx,
+                              AVPixelFormat sw_fmt = AV_PIX_FMT_BGRA)
 {
     auto* d3d11dev = static_cast<ID3D11Device*>(raw_device);
     if (!d3d11dev) return false;
@@ -104,10 +105,15 @@ static bool try_init_gpu_path(AVCodecContext* ctx,
 
     auto* frm_ctx          = reinterpret_cast<AVHWFramesContext*>(hw_frm_ctx->data);
     frm_ctx->format         = AV_PIX_FMT_D3D11;
-    // SpoutDX の内部テクスチャは DXGI_FORMAT_B8G8R8A8_UNORM = AV_PIX_FMT_BGRA。
-    // FFmpeg D3D11VA は RGBA を未サポートだが BGRA はサポートしており、
-    // NVENC も BGRA D3D11 テクスチャを直接エンコード可能。
-    frm_ctx->sw_format      = AV_PIX_FMT_BGRA;
+    // センダーの実フォーマットに合わせて sw_format を設定する。
+    // sw_format はプールテクスチャの DXGI フォーマットと対応する:
+    //   AV_PIX_FMT_BGRA → DXGI_FORMAT_B8G8R8A8_UNORM (87)
+    //   AV_PIX_FMT_RGBA → DXGI_FORMAT_R8G8B8A8_UNORM (28)
+    // CopySubresourceRegion はフォーマット不一致時に戻り値もエラーも返さず無音で失敗するため、
+    // センダーフォーマットと一致したプールを用意することが正しい映像出力の必要条件。
+    // AV_PIX_FMT_RGBA が FFmpeg/NVENC でサポートされない場合は av_hwframe_ctx_init() が失敗し、
+    // 呼び出し元が CPU パスへフォールバックする。
+    frm_ctx->sw_format      = sw_fmt;
     frm_ctx->width          = static_cast<int>(width);
     frm_ctx->height         = static_cast<int>(height);
     frm_ctx->initial_pool_size = 4;  // ラウンドロビン用プール
@@ -131,7 +137,8 @@ static bool try_init_gpu_path(AVCodecContext* ctx,
 bool EncoderController::init(const EncoderConfig& config,
                               uint32_t width, uint32_t height,
                               std::string& error,
-                              void* d3d_device) {
+                              void* d3d_device,
+                              uint32_t sender_dxgi_format) {
     reset();
     config_ = config;
     width_  = width;
@@ -180,11 +187,23 @@ bool EncoderController::init(const EncoderConfig& config,
         ID3D11DeviceContext* d3d_ctx_tmp = nullptr;
 
         if (is_hw_codec && d3d_device) {
+            // センダーの DXGI フォーマットに合わせて GPU プールの sw_format を選択する。
+            // CopySubresourceRegion はフォーマット不一致時に戻り値もエラーも返さず無音で失敗するため、
+            // センダーが DXGI_FORMAT_R8G8B8A8_UNORM (RGBA) なら AV_PIX_FMT_RGBA を試みる。
+            // AV_PIX_FMT_RGBA が FFmpeg D3D11VA で未サポートの場合は av_hwframe_ctx_init() が
+            // 失敗し、以下のブロックで CPU パスへ自動フォールバックする。
+            // 0 (未指定) または DXGI_FORMAT_B8G8R8A8_UNORM は従来通り AV_PIX_FMT_BGRA を使用する。
+            AVPixelFormat gpu_sw_fmt = AV_PIX_FMT_BGRA;  // デフォルト: BGRA
+            if (sender_dxgi_format == DXGI_FORMAT_R8G8B8A8_UNORM) {
+                gpu_sw_fmt = AV_PIX_FMT_RGBA;
+            }
+
             gpu_init_ok = try_init_gpu_path(ctx, d3d_device,
                                             width, height,
                                             &hw_device_ctx_tmp,
                                             &hw_frames_ctx_tmp,
-                                            &d3d_ctx_tmp);
+                                            &d3d_ctx_tmp,
+                                            gpu_sw_fmt);
         }
 
         AVDictionary* opts = nullptr;
@@ -392,8 +411,21 @@ bool EncoderController::encode(const FrameBuffer& frame,
                     pool_tex, pool_index, 0, 0, 0,
                     src_tex, 0, nullptr);
             } else {
-                // CPU フォールバック: UpdateSubresource で CPU データを転送する
-                // (GPU 初期化後・最初の数フレームは gpu_texture が null のことがある)
+                // CPU フォールバック: UpdateSubresource で CPU データを転送する。
+                //
+                // 通常、GPU ゼロコピーパスが有効な場合 SpoutMonitor::receive_latest_frame()
+                // は GPU モード (set_gpu_mode(true)) で動作するため、buf.data.clear() により
+                // frame.data は常に空になる。frame.data が空かつ gpu_texture が null の場合は
+                // encode() 冒頭の早期 return (frame.data.empty() && !frame.gpu_texture) で
+                // スキップされるため、このブランチは通常到達しない。
+                //
+                // このブランチに到達するとしたら SpoutMonitor が CPU モードのまま encode()
+                // に渡された場合だが、その場合 gpu_path_active() == true であれば
+                // frame.data の内容がプールの DXGI フォーマットと一致している必要がある。
+                // SpoutMonitor CPU パスは常に RGBA を返すため、プールが BGRA の場合は
+                // R/B が入れ替わった色化けが発生しうる。GPU モードの切り替えは
+                // supervisor.cpp で gpu_path_active() 確認後に行われているため、
+                // 正常なコードパスでは本ブランチでの不一致は発生しない。
                 D3D11_BOX box{};
                 box.left   = 0;
                 box.top    = 0;
@@ -401,7 +433,7 @@ bool EncoderController::encode(const FrameBuffer& frame,
                 box.right  = frame.width;
                 box.bottom = frame.height;
                 box.back   = 1;
-                UINT row_pitch = frame.width * 4;  // RGBA
+                UINT row_pitch = frame.width * 4;  // 4 bytes/pixel (RGBA/BGRA 共通)
                 if (row_pitch == 0) {
                     av_frame_free(&hw_frame);
                     return false;

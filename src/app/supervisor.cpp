@@ -720,9 +720,14 @@ void Supervisor::handle_stopping() {
 bool Supervisor::init_encoder_and_rtsp(uint32_t width, uint32_t height, std::string& error) {
     encoder_ = std::make_unique<EncoderController>();
 
-    // GPU ゼロコピーパスを試みる: SpoutMonitor が保持する D3D11 デバイスを渡す
+    // GPU ゼロコピーパスを試みる: SpoutMonitor が保持する D3D11 デバイスと
+    // センダーの実際の DXGI テクスチャフォーマットを渡す。
+    // フォーマットが BGRA 固定で決め打ちされていると、RGBA センダー (Unity/VRChat 等) では
+    // CopySubresourceRegion がフォーマット不一致で無音失敗し常に黒画面になるため、
+    // 実際のフォーマットを動的に取得して渡すことが必要。
     void* gpu_dev = spout_monitor_ ? spout_monitor_->gpu_device() : nullptr;
-    if (!encoder_->init(config_.encoder, width, height, error, gpu_dev)) {
+    const uint32_t sender_fmt = spout_monitor_ ? spout_monitor_->get_sender_dxgi_format() : 0;
+    if (!encoder_->init(config_.encoder, width, height, error, gpu_dev, sender_fmt)) {
         log_->log_error("ENCODER_INIT_FAILED", error);
         return false;
     }

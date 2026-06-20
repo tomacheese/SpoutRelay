@@ -24,15 +24,20 @@ public:
     EncoderController();
     ~EncoderController();
 
-    /// @param d3d_device   SpoutMonitor::gpu_device() が返す型消去済み ID3D11Device* 。
-    ///                     非 null かつコーデックが NVENC/AMF/QSV の場合に GPU
-    ///                     ゼロコピーパスを試みる。GPU 初期化が失敗した場合は
-    ///                     自動的に CPU パスにフォールバックし、エラーにはならない。
-    ///                     nullptr を渡すと常に CPU パスを使用する。
+    /// @param d3d_device          SpoutMonitor::gpu_device() が返す型消去済み ID3D11Device* 。
+    ///                            非 null かつコーデックが NVENC/AMF/QSV の場合に GPU
+    ///                            ゼロコピーパスを試みる。GPU 初期化が失敗した場合は
+    ///                            自動的に CPU パスにフォールバックし、エラーにはならない。
+    ///                            nullptr を渡すと常に CPU パスを使用する。
+    /// @param sender_dxgi_format  SpoutMonitor::get_sender_dxgi_format() の戻り値。
+    ///                            GPU プールのテクスチャフォーマットをセンダーの実フォーマットに
+    ///                            合わせることで CopySubresourceRegion の無音失敗を防ぐ。
+    ///                            0 を渡すと BGRA (DXGI_FORMAT_B8G8R8A8_UNORM = 87) を仮定する。
     bool init(const EncoderConfig& config,
               uint32_t width, uint32_t height,
               std::string& error,
-              void* d3d_device = nullptr);
+              void* d3d_device = nullptr,
+              uint32_t sender_dxgi_format = 0);
 
     /**
      * @param content_changed 直前の encode() 呼び出しからピクセル内容が変化している場合は true。

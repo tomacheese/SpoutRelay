@@ -142,16 +142,23 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
             }
         }
 
-        // GetSenderTexture() は SpoutDX 内部テクスチャ (BGRA) のポインタを返す。
+        // GetSenderTexture() は SpoutDX 内部テクスチャのポインタを返す。
         // このポインタは次回 ReceiveTexture() 呼び出しまで有効。
+        // フォーマットはセンダー依存: BGRA (87) が多いが Unity/VRChat 等は RGBA (28) を使う。
+        // EncoderController::init() が get_sender_dxgi_format() で取得した値に基づいて
+        // GPU プールのフォーマットを合わせているため、センダーに合わせた値を設定する。
         ID3D11Texture2D* tex = impl_->receiver.GetSenderTexture();
 
         buf.data.clear();             // GPU パスでは CPU バッファ不要
         buf.gpu_texture = tex;        // EncoderController が CopySubresourceRegion に使用
         buf.width  = w;
         buf.height = h;
-        // SpoutDX の内部テクスチャは DXGI_FORMAT_B8G8R8A8_UNORM = BGRA
-        buf.format = PixelFormat::BGRA;
+        // EncoderController のフォーマット選択ロジック (encoder_controller.cpp) と方向を揃える:
+        //   DXGI_FORMAT_R8G8B8A8_UNORM (RGBA) → PixelFormat::RGBA
+        //   それ以外 (DXGI_FORMAT_B8G8R8A8_UNORM=BGRA および未知フォーマット) → PixelFormat::BGRA
+        // ※ 未知フォーマットは BGRA 扱いとすることで encoder 側デフォルトと一致させる。
+        const DWORD dxgi_fmt = impl_->receiver.GetSenderFormat();
+        buf.format = (dxgi_fmt == DXGI_FORMAT_R8G8B8A8_UNORM) ? PixelFormat::RGBA : PixelFormat::BGRA;
     } else {
         // CPU パス（従来動作）
         size_t required = static_cast<size_t>(w) * h * 4;
@@ -217,6 +224,16 @@ void* SpoutMonitor::gpu_device() {
 void SpoutMonitor::set_gpu_mode(bool enabled) {
     std::lock_guard<std::mutex> lock(impl_->mutex_);
     impl_->gpu_mode = enabled;
+}
+
+uint32_t SpoutMonitor::get_sender_dxgi_format() const {
+    std::lock_guard<std::mutex> lock(impl_->mutex_);
+    // GetSenderFormat() は DXGI_FORMAT を DWORD で返す。
+    // connect() は impl_->connected=true にするだけで実接続前でも true になり得るため、
+    // is_connected() と同様に receiver.IsConnected() も確認することで、
+    // 未接続状態での GetSenderFormat() のデフォルト値/前回値の混入を防ぐ。
+    if (!impl_->connected || !impl_->receiver.IsConnected()) return 0;
+    return static_cast<uint32_t>(impl_->receiver.GetSenderFormat());
 }
 
 bool SpoutMonitor::is_device_removed() const {
