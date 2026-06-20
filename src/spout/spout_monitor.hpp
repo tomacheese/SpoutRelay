@@ -29,6 +29,14 @@ public:
     ///        無効時は従来の CPU コピーパスを使用する。
     virtual void set_gpu_mode(bool enabled) = 0;
 
+    /// @brief 現在接続中の Spout センダーの送出テクスチャ DXGI フォーマット値を返す。
+    ///        接続前や未接続時は 0 を返す。
+    ///        EncoderController::init() に渡すことで、GPU プールのフォーマットを
+    ///        センダーのフォーマットに合わせ CopySubresourceRegion の無音失敗を防ぐ。
+    ///        代表的な値: 28 = DXGI_FORMAT_R8G8B8A8_UNORM (RGBA, Unity/VRChat 等)、
+    ///                    87 = DXGI_FORMAT_B8G8R8A8_UNORM (BGRA, デフォルト)。
+    virtual uint32_t get_sender_dxgi_format() const = 0;
+
     // --- GPU デバイスロスト回復パス用 ---
 
     /// @brief D3D11 デバイスがロスト状態かどうかを確認する。
@@ -57,6 +65,7 @@ public:
     bool is_connected() const override;
     void* gpu_device() override;
     void set_gpu_mode(bool enabled) override;
+    uint32_t get_sender_dxgi_format() const override;
     bool is_device_removed() const override;
     bool reinit_device(std::string& error) override;
 
