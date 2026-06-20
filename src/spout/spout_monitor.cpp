@@ -118,7 +118,7 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
         ok = impl_->receiver.ReceiveTexture();
 
         // impl_->connected はここで更新しない。
-        // impl_->connected = receiver.IsConnected() とすると、センダーが一時切断した際に
+        // impl_->connected = impl_->receiver.IsConnected() とすると、センダーが一時切断した際に
         // false になり、復帰後も receive_latest_frame() 冒頭のガードで弾かれ続ける。
         // SetReceiverName() 済みの SpoutDX は ReceiveTexture() を再呼び出しすれば
         // センダー復帰を自動検出できるため、ここでは connected を変更しない。
