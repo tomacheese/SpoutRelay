@@ -58,9 +58,7 @@ jobs:
           custom_release_rules: "feat:minor:✨ Features,fix:patch:🐛 Fixes,docs:patch:📰 Docs,chore:patch:🎨 Chore,pref:patch:🎈 Performance improvements,refactor:patch:🧹 Refactoring,build:patch:🔍 Build,ci:patch:🔍 CI,revert:patch:⏪ Revert,style:patch:🧹 Style,test:patch:👀 Test,release:major:📦 Release"
           # マージ済みの場合のみ実際にタグを作成する（PR 中はドライラン）
           dry_run: ${{ github.event.pull_request.merged == true && 'false' || 'true' }}
-          # pull_request_target の GITHUB_SHA は merge 後の master HEAD を指さないことがあり、
-          # それが原因で v0.8.0 がマージ前のコミットに発行された (2026-06-20)。
-          # 実際に checkout したコミットを明示して根本的に防ぐ。
+          # pull_request_target の GITHUB_SHA は merge 後の HEAD を指さない場合があるため明示的に指定
           commit_sha: ${{ steps.checkout.outputs.commit }}
 
   cpp-build:
