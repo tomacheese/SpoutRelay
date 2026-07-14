@@ -40,7 +40,10 @@ static void setup_device_mt_protection(spoutDX& receiver) {
 }
 
 bool SpoutMonitor::init(std::string& error) {
-    impl_->receiver.SetAdapterAuto(true); // auto-switch to sender's GPU adapter
+    // 自動アダプタ切り替えは無効化する。有効だと共有ハンドル変更時に
+    // CheckSenderTexture() が impl_->mutex_ 保持中に D3D11 デバイスを
+    // 同期的に再生成し、フリーズの原因になりうる (2026-07-14 incident)。
+    impl_->receiver.SetAdapterAuto(false);
     if (!impl_->receiver.OpenDirectX11()) {
         error = "Failed to initialise DirectX 11 for Spout receiver";
         return false;
