@@ -40,7 +40,43 @@ void test_load_minimal_valid() {
     VERIFY(cfg.placeholder.background_hex == "#000000");
     VERIFY(cfg.placeholder.text_hex == "#FFFFFF");
     VERIFY(cfg.placeholder.show_sender_name == true);
+    // spout.stalled_recovery_max_attempts 省略時は既定値 (10) となること
+    VERIFY(cfg.spout.stalled_recovery_max_attempts == 10);
     printf("[PASS] test_load_minimal_valid\n");
+}
+
+void test_load_stalled_recovery_max_attempts() {
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender", "stalled_recovery_max_attempts": 5 },
+      "rtsp": { "url": "rtsp://192.168.0.100:8554/live" },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(ok, "spout.stalled_recovery_max_attempts should load");
+    VERIFY(cfg.spout.stalled_recovery_max_attempts == 5);
+    printf("[PASS] test_load_stalled_recovery_max_attempts\n");
+}
+
+void test_stalled_recovery_max_attempts_zero_disables_watchdog() {
+    // 0 以下はウォッチドッグ無効化を意味する仕様上の正当な値であり、
+    // バリデーションエラーにはしない
+    const std::string json = R"({
+      "spout": { "sender_name": "TestSender", "stalled_recovery_max_attempts": 0 },
+      "rtsp": { "url": "rtsp://192.168.0.100:8554/live" },
+      "encoder": { "fps": 30, "bitrate_kbps": 4000 }
+    })";
+    auto path = write_temp_config(json);
+    AppConfig cfg;
+    std::string err;
+    bool ok = ConfigLoader::load(path, cfg, err);
+    cleanup(path);
+    VERIFY_MSG(ok, "spout.stalled_recovery_max_attempts=0 should be valid (watchdog disabled)");
+    VERIFY(cfg.spout.stalled_recovery_max_attempts == 0);
+    printf("[PASS] test_stalled_recovery_max_attempts_zero_disables_watchdog\n");
 }
 
 void test_load_all_sections() {
@@ -451,6 +487,8 @@ int main() {
     test_reconnect_max_delay_less_than_delay_fails();
     test_reconnect_backoff_multiplier_below_one_fails();
     test_invalid_placeholder_text_hex_fails();
+    test_load_stalled_recovery_max_attempts();
+    test_stalled_recovery_max_attempts_zero_disables_watchdog();
 
     run_state_machine_tests();
     run_metrics_tests();

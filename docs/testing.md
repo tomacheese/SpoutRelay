@@ -233,6 +233,13 @@ issue で定義されている「モンキーテスト」は、設計書 (`docs/
 > `prefer_dx11: false`、極端な FPS は `e2e-test/encoder-config-tests.ps1` で
 > 自動検証されます。
 
+- **`spout.stalled_recovery_max_attempts` ウォッチドッグの発動確認**:
+  RTSP のみの再接続では回復しない STALLED ループを人工的に発生させることが難しいため、
+  現時点では自動 E2E で網羅できていません。改修時は `stalled_recovery_max_attempts` を
+  小さい値 (例: `2`) に設定した上で、意図的に `SpoutMonitor` 側の再接続を失敗させる
+  デバッグビルド等で `stalled_recovery_forced` ログが記録され `PROBING` へ遷移することを
+  手動で確認してください。
+
 ---
 
 ## 長時間耐久・ネットワーク異常試験 (手動手順)
