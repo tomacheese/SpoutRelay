@@ -40,7 +40,6 @@ void test_load_minimal_valid() {
     VERIFY(cfg.placeholder.background_hex == "#000000");
     VERIFY(cfg.placeholder.text_hex == "#FFFFFF");
     VERIFY(cfg.placeholder.show_sender_name == true);
-    // spout.stalled_recovery_max_attempts 省略時は既定値 (10) となること
     VERIFY(cfg.spout.stalled_recovery_max_attempts == 10);
     printf("[PASS] test_load_minimal_valid\n");
 }
