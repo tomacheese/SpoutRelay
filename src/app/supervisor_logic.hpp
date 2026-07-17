@@ -79,4 +79,27 @@ inline bool should_reset_connect_timer_once(bool& source_responded) {
     return true;
 }
 
+/// @brief STALLED からの復帰試行(RTSP 再接続)を繰り返しても実際のフレーム受信が
+///        一度も回復しないまま一定回数を超えた場合に、Spout 受信側を含めた
+///        完全な再接続 (PROBING からのやり直し) を強制すべきかどうかを判定する。
+///
+///        handle_stalled() の「送信元消失」判定(stall_timer_ +
+///        sender_missing_timeout_ms、probe_sender() で確認)とは別の、
+///        「センダーは存在し続けているのに frame_pump_ が二度とフレームを
+///        受信できなくなる」という異常な膠着状態に対する保険的なウォッチドッグ。
+///        (例: GPU ゼロコピーパスと CPU パスが同一セッション内で切り替わった際に
+///        spoutDX 内部の更新イベントフラグが正しく再初期化されず、CPU パスの
+///        受信が恒久的に失敗し続けるバグ。RTSP 層の再接続だけでは解消しない)
+///
+///        max_attempts <= 0 の場合はウォッチドッグを無効化する(既定動作を維持)。
+///
+/// @param consecutive_stall_recoveries STALLED → RECONNECTING_OUTPUT を試みたが
+///        一度も本当の復帰 (stall_recovered) に至っていない連続回数
+/// @param max_attempts 強制リセットまでの許容回数 (config 由来。0 以下で無効)
+/// @return 強制的に Spout 側を含め再接続すべきなら true
+inline bool should_force_spout_recovery(int consecutive_stall_recoveries,
+                                        int max_attempts) {
+    return max_attempts > 0 && consecutive_stall_recoveries >= max_attempts;
+}
+
 } // namespace supervisor_logic

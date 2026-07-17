@@ -85,6 +85,14 @@ private:
     uint32_t current_height_ = 0;
     int reconnect_attempts_  = 0;
 
+    /// @brief STALLED → RECONNECTING_OUTPUT (RTSP のみの再接続) を試みたが、
+    ///        一度も本当の復帰 (handle_stalled() の stall_recovered) に
+    ///        至っていない連続回数。supervisor_logic::should_force_spout_recovery()
+    ///        の判定に使う保険的ウォッチドッグ用カウンター。フレーム受信が実際に
+    ///        回復した場合 (handle_stalled() の stall_recovered) に加え、
+    ///        handle_connecting_output() が STREAMING へ正常遷移した場合にも 0 に戻す。
+    int consecutive_stall_recoveries_ = 0;
+
     /// @brief 直近に接続した実ソースの解像度。
     ///        PLACEHOLDER 状態で映像を生成する際、config の既定解像度より
     ///        この値を優先することで、ソース復帰時の RTSP 再構成を避ける。

@@ -72,6 +72,8 @@ bool ConfigLoader::load(const std::string& path, AppConfig& out, std::string& er
             if (s.contains("sender_missing_timeout_ms"))
                 out.spout.sender_missing_timeout_ms = s["sender_missing_timeout_ms"].get<int>();
             if (s.contains("prefer_dx11"))             out.spout.prefer_dx11             = s["prefer_dx11"].get<bool>();
+            if (s.contains("stalled_recovery_max_attempts"))
+                out.spout.stalled_recovery_max_attempts = s["stalled_recovery_max_attempts"].get<int>();
         }
 
         // placeholder section

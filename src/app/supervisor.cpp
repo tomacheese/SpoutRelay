@@ -414,6 +414,39 @@ void Supervisor::handle_connecting_output() {
         log_->log_publish_started(config_.rtsp.url,
             static_cast<int>(current_width_), static_cast<int>(current_height_),
             config_.encoder.fps);
+
+        // init_encoder_and_rtsp() はセンダーの実フォーマットを見て GPU ゼロコピー
+        // パス (ReceiveTexture 無引数) と CPU パス (ReceiveImage) のどちらを使うか
+        // を今まさに (再) 決定した (SpoutMonitor::set_gpu_mode())。
+        // この判定より前に上のフレーム待機ループが receive_latest_frame() を
+        // 呼んでいるが、それは「変更前」の gpu_mode を使っている。
+        // spoutDX 内部の更新イベントフラグ (m_bUpdated) は ReceiveTexture() 無引数版
+        // だと呼び出し側が IsUpdated() を呼ばなくても内部で消費・リセットされる一方、
+        // ReceiveImage() 側は CheckStagingTextures() を m_bUpdated==true の時にしか
+        // 呼ばないため、切り替え前に別パスがこのフラグを消費済みだと、切り替え後の
+        // パスの一度きりの初期化 (CheckTexture()/CheckStagingTextures()) が永久に
+        // 実行されず、以後 receive_latest_frame() が恒久的に失敗し続ける
+        // (センダーは生きているのに STREAMING→STALLED を無限に繰り返すバグ)。
+        // disconnect()+connect() で spoutDX 側を ReleaseReceiver() から作り直し、
+        // 新規接続イベントとして m_bUpdated を確実に立て直すことで、
+        // 最終的に選択された受信パスの初期化を保証する。
+        //
+        // 注意: disconnect() (ReleaseReceiver()) は spoutDX 内部テクスチャを解放するため、
+        // 上の待機ループで取得した initial_frame_buf_ が GPU パスのポインタ
+        // (gpu_texture) を保持している場合、そのポインタは解放後アクセスすると
+        // use-after-free になる。teardown_encoder() が disconnect 前に必ず
+        // set_gpu_mode(false) するのと同じ理由で、ここでも disconnect 後は
+        // 古いセッションのテクスチャポインタを破棄する。
+        std::string reset_err;
+        spout_monitor_->disconnect();
+        initial_frame_buf_.gpu_texture = nullptr;
+        if (!spout_monitor_->connect(config_.spout.sender_name, reset_err)) {
+            log_->log_error("SPOUT_RECONNECT_FAILED", reset_err);
+            teardown_rtsp();
+            teardown_encoder();
+            state_machine_.transition_to(PublisherState::PROBING);
+            return;
+        }
     }
 
     metrics_->set_sender_info(
@@ -428,6 +461,7 @@ void Supervisor::handle_connecting_output() {
     start_encode_thread();
     rtsp_backoff_.reset(config_.rtsp.reconnect_delay_ms);
     reconnect_attempts_ = 0;
+    consecutive_stall_recoveries_ = 0;
     state_machine_.transition_to(PublisherState::STREAMING);
 }
 
@@ -511,6 +545,10 @@ void Supervisor::handle_stalled() {
         int64_t elapsed = time_utils::now_ms() - frame_pump_->last_source_alive_ms();
         if (elapsed < config_.spout.frame_timeout_ms) {
             log_->log_event(spdlog::level::info, "stall_recovered", {});
+            // 実際にフレーム受信が回復したので、保険的ウォッチドッグのカウンターを
+            // クリアする(RTSP のみの再接続では回復しない)。なお同カウンターは
+            // handle_connecting_output() が STREAMING へ正常遷移した場合にもリセットされる。
+            consecutive_stall_recoveries_ = 0;
             state_machine_.transition_to(PublisherState::STREAMING);
             return;
         }
@@ -572,6 +610,27 @@ void Supervisor::handle_stalled() {
                                 rtsp_client_->is_connected();
             placeholder_cooldown_active_ = false;
             state_machine_.transition_to(PublisherState::PLACEHOLDER);
+            return;
+        }
+
+        // センダーは probe_sender() で健在と確認できているのに、ここに至るのは
+        // 「RTSP のみの再接続では frame_pump_ のフレーム受信が回復しない」
+        // 異常な膠着状態を意味しうる(handle_connecting_output() の恒久修正で
+        // 主要因は解消済みだが、未知の類似要因への保険として残す)。
+        // RTSP 再接続を試みても一向に stall_recovered に至らない状態が
+        // 一定回数続いた場合は、Spout 受信側を含めた完全な再接続を強制する。
+        ++consecutive_stall_recoveries_;
+        if (supervisor_logic::should_force_spout_recovery(
+                consecutive_stall_recoveries_,
+                config_.spout.stalled_recovery_max_attempts)) {
+            log_->log_event(spdlog::level::warn, "stalled_recovery_forced",
+                            {{"attempts", std::to_string(consecutive_stall_recoveries_)}});
+            consecutive_stall_recoveries_ = 0;
+            if (frame_pump_) { frame_pump_->stop(); frame_pump_.reset(); }
+            spout_monitor_->disconnect();
+            teardown_rtsp();
+            teardown_encoder();
+            state_machine_.transition_to(PublisherState::PROBING);
         } else {
             teardown_rtsp();
             state_machine_.transition_to(PublisherState::RECONNECTING_OUTPUT);

@@ -130,5 +130,37 @@ int run_supervisor_logic_tests() {
         printf("[PASS] should_reset_connect_timer_once: only first of repeated calls is true\n");
     }
 
+    // --- should_force_spout_recovery -----------------------------------------
+
+    {
+        bool force = should_force_spout_recovery(9, 10);
+        VERIFY_MSG(!force, "consecutive_stall_recoveries below max_attempts → no forced recovery");
+        printf("[PASS] should_force_spout_recovery: below threshold\n");
+    }
+
+    {
+        bool force = should_force_spout_recovery(10, 10);
+        VERIFY_MSG(force, "consecutive_stall_recoveries == max_attempts → forced recovery");
+        printf("[PASS] should_force_spout_recovery: at threshold\n");
+    }
+
+    {
+        bool force = should_force_spout_recovery(15, 10);
+        VERIFY_MSG(force, "consecutive_stall_recoveries above max_attempts → forced recovery");
+        printf("[PASS] should_force_spout_recovery: above threshold\n");
+    }
+
+    {
+        bool force = should_force_spout_recovery(1000, 0);
+        VERIFY_MSG(!force, "max_attempts=0 → watchdog disabled");
+        printf("[PASS] should_force_spout_recovery: disabled when max_attempts=0\n");
+    }
+
+    {
+        bool force = should_force_spout_recovery(1000, -1);
+        VERIFY_MSG(!force, "max_attempts negative → watchdog disabled");
+        printf("[PASS] should_force_spout_recovery: disabled when max_attempts negative\n");
+    }
+
     return 0;
 }

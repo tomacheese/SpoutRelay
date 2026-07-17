@@ -16,6 +16,14 @@ struct AppConfig {
         int frame_timeout_ms          = 300;
         int sender_missing_timeout_ms = 800;
         bool prefer_dx11              = true;
+
+        /// @brief STALLED からの RTSP 再接続 (RECONNECTING_OUTPUT) を試みても
+        ///        一度もフレーム受信が回復しないまま連続で何回失敗したら、
+        ///        Spout 受信側 (SpoutMonitor) を含めた完全な再接続
+        ///        (PROBING からのやり直し) を強制するか。0 以下で無効化。
+        ///        (GPU/CPU 受信パス切替時の spoutDX 内部フラグ不整合等、
+        ///        RTSP 層の再接続だけでは解消しない膠着状態への保険的対策)
+        int stalled_recovery_max_attempts = 10;
     } spout;
 
     /// @brief Spout 映像/デバイスが見つからない間に配信する

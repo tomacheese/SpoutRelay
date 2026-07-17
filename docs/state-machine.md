@@ -182,3 +182,45 @@ FATAL
 | `gpu_device_lost` | `warn` | デバイスロスト検出・回復開始 |
 | `gpu_device_reinit_ok` | `info` | デバイス再作成成功 |
 | `SPOUT_REINIT_FAILED` | `error` | デバイス再作成失敗（FATAL へ） |
+
+## STALLED からの保険的ウォッチドッグ (`stalled_recovery_forced`)
+
+`STALLED` からの復帰は通常 RTSP レイヤーのみの再接続 (`RECONNECTING_OUTPUT`) で行われますが、
+GPU/CPU 受信パス切替時に spoutDX 内部の更新イベントフラグ (`m_bUpdated`) が正しく
+再初期化されないなどの要因で、センダー自体は生存し続けているのに `frame_pump_` が
+二度とフレームを受信できなくなる膠着状態が起こりえます。この場合 RTSP 層の再接続を
+繰り返しても実際のフレーム受信は永遠に回復しません。
+
+この保険的対策として、`handle_stalled()` は STALLED → RECONNECTING_OUTPUT を試みても
+一度も本当の復帰 (フレーム受信の再開) に至らなかった連続回数
+(`consecutive_stall_recoveries_`) をカウントし、`spout.stalled_recovery_max_attempts`
+(既定 `10`) に達すると、RTSP のみの再接続では回復不能な膠着状態とみなして
+Spout 受信側を含めた完全な再接続を強制します。
+
+### 動作フロー
+
+```
+STALLED
+  ↓ (frame_pump_ 生存確認 → 復帰していない)
+  ↓ ++consecutive_stall_recoveries_
+  ↓ consecutive_stall_recoveries_ >= stalled_recovery_max_attempts ?
+  │
+  ├─ No  → 従来どおり teardown_rtsp() → RECONNECTING_OUTPUT (RTSP のみ再接続)
+  │
+  └─ Yes → stalled_recovery_forced ログ出力 → consecutive_stall_recoveries_ = 0
+           → frame_pump_ 停止・reset → spout_monitor_->disconnect()
+           → teardown_rtsp() → teardown_encoder() → PROBING (完全な再接続)
+```
+
+`consecutive_stall_recoveries_` は、真にフレーム受信が回復した場合
+(`handle_stalled()` の `stall_recovered`) と、`handle_connecting_output()` が
+STREAMING へ正常に遷移した場合の両方でゼロにリセットされます。
+
+`stalled_recovery_max_attempts` を `0` 以下に設定するとこのウォッチドッグは無効化され、
+従来どおり RTSP のみの再接続を無制限に繰り返します。
+
+### 関連ログイベント
+
+| イベント | レベル | 説明 |
+|---------|-------|------|
+| `stalled_recovery_forced` | `warn` | RTSP のみの再接続を規定回数繰り返しても復帰しなかったため、Spout 側を含めた完全な再接続を強制した |

@@ -54,6 +54,30 @@ for ($i = 0; $i -lt 10; $i++) {
 2. **センダーがフレームを送出していない** — VRChat 等の送信側アプリが実際に動作しているか確認
 3. **`frame_timeout_ms` が短すぎる** — GPU 負荷が高い場合は `300` → `500` 以上に増やす
 
+### `STALLED` → `RECONNECTING_OUTPUT` の無限ループ (`healthy: false`, `frames_received: 0` のまま増加しない)
+
+**症状:** `health.json` が `state: STALLED` (または `RECONNECTING_OUTPUT` との往復) のまま固定され、
+`reconnect_attempts` だけが増加し続ける。`sender_fps: 0.0` で `rtsp_errors` は増えない
+(RTSP 自体は正常に再接続できているが、Spout 側からフレームが一切届かない)。
+
+**原因:** PLACEHOLDER → 実ソース復帰時などに GPU ゼロコピーパス (`ReceiveTexture()`) と
+CPU パス (`ReceiveImage()`) が同一セッション内で切り替わる際、spoutDX 内部の更新イベント
+フラグ (`m_bUpdated`) の消費タイミングが GPU/CPU パス間で非対称であるため、CPU パス側の
+一度限りの初期化 (`CheckStagingTextures()`) が実行されないまま `receive_latest_frame()` が
+恒久的に失敗し続けることがあります。RTSP レイヤーの再接続だけではこの状態を解消できません。
+
+**恒久対応 (適用済み):** `handle_connecting_output()` で、エンコーダーが GPU/CPU いずれの
+受信パスを使うか確定した直後に `SpoutMonitor` を明示的に `disconnect()`/`connect()` し、
+`m_bUpdated` を確実にリセットしてから初回フレーム受信を開始するようにしました。
+
+**保険的対応 (適用済み):** それでも同種の膠着状態が発生した場合に備え、
+`spout.stalled_recovery_max_attempts` (既定 `10`) 回 STALLED → RECONNECTING_OUTPUT を
+繰り返してもフレーム受信が回復しない場合、Spout 受信側を含めた完全な再接続
+(`PROBING` からのやり直し) を自動的に強制します。詳細は
+[`docs/state-machine.md` の「STALLED からの保険的ウォッチドッグ」](state-machine.md#stalled-からの保険的ウォッチドッグ-stalled_recovery_forced)
+を参照してください。ログに `stalled_recovery_forced` イベントが記録されていれば、
+この保険的ウォッチドッグが発動したことを示します。
+
 ---
 
 ## GPU TDR（デバイスロスト）関連
