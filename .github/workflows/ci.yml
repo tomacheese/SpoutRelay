@@ -42,7 +42,7 @@ jobs:
     steps:
       - name: 🛎 Checkout
         id: checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # マージ済みの場合は base ブランチ (master)、未マージの場合は PR ヘッド SHA を使う
           ref: ${{ github.event.pull_request.merged == true && github.base_ref || github.event.pull_request.head.sha }}
@@ -77,7 +77,7 @@ jobs:
 
     steps:
       - name: 🛎 Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
           token: ${{ secrets.GITHUB_TOKEN }}
