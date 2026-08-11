@@ -158,6 +158,8 @@ bool EncoderController::init(const EncoderConfig& config,
 
         ctx->codec_id     = codec->id;
         ctx->bit_rate     = static_cast<int64_t>(config.bitrate_kbps) * 1000;
+        ctx->rc_max_rate  = ctx->bit_rate;
+        ctx->rc_buffer_size = static_cast<int>(ctx->bit_rate);
         ctx->width        = static_cast<int>(width);
         ctx->height       = static_cast<int>(height);
         ctx->time_base    = {1, config.fps};
