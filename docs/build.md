@@ -116,7 +116,7 @@ build/
 All tests passed.
 ```
 
-（97 行の `[PASS]` が出力される）
+（104 行の `[PASS]` が出力される）
 
 テストの分類・実行方法の詳細は [docs/testing.md](testing.md) を参照してください。
 

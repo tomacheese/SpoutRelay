@@ -190,6 +190,7 @@ logs/<instance_name>.jsonl
 | `RTSP_CONNECT_FAILED` | RTSP サーバーへの接続失敗 |
 | `RTSP_SEND_FAILED` | RTP パケット送信エラー |
 | `RTSP_TIMEOUT` | RTSP 送信タイムアウト |
+| `STATE_FILE_WRITE_FAILED` | `metrics.json` / `health.json` の書き込み失敗（旧ファイルは保持される。`target` / `path` を付与し、失敗開始時と原因が変わったときのみ記録） |
 | `FATAL_ERROR` | 回復不能なエラー |
 
 ---

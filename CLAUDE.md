@@ -30,7 +30,7 @@ Copy-Item deps\ffmpeg\bin\*.dll build\
 After every change, run unit tests at minimum. For state-machine / RTSP / encoder changes also run E2E tests.
 
 ```powershell
-# Unit tests (required, ~97 PASS lines expected)
+# Unit tests (required, ~104 PASS lines expected)
 cmake --build build --target publisher_tests -j 4
 .\build\tests\publisher_tests.exe
 

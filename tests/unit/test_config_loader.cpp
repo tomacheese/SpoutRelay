@@ -178,6 +178,7 @@ void test_invalid_fps_fails() {
 // Declared in other test files
 extern int run_state_machine_tests();
 extern int run_metrics_tests();
+extern int run_atomic_file_tests();
 extern int run_backoff_tests();
 extern int run_placeholder_renderer_tests();
 extern int run_log_sink_tests();
@@ -491,6 +492,7 @@ int main() {
 
     run_state_machine_tests();
     run_metrics_tests();
+    run_atomic_file_tests();
     run_backoff_tests();
     run_placeholder_renderer_tests();
     run_log_sink_tests();

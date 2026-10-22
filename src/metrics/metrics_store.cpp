@@ -1,4 +1,5 @@
 #include "metrics/metrics_store.hpp"
+#include "common/atomic_file.hpp"
 #include "common/time_utils.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -115,28 +116,8 @@ std::string MetricsStore::build_health_json(bool with_ts) const {
     return j.dump(2);
 }
 
-static bool write_atomic(const std::string& path, const std::string& content) {
-    std::string tmp = path + ".tmp";
-    try {
-        auto parent = fs::path(path).parent_path();
-        if (!parent.empty())
-            fs::create_directories(parent);
-        std::ofstream f(tmp);
-        if (!f.is_open()) return false;
-        f << content;
-        f.close();
-        // std::filesystem::rename does not atomically replace existing files on
-        // Windows. Remove the destination first to avoid failures on second write.
-        if (fs::exists(path))
-            fs::remove(path);
-        fs::rename(tmp, path);
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-bool MetricsStore::save_metrics(const std::string& path) {
+bool MetricsStore::save_metrics(const std::string& path, std::string* error) {
+    if (error) error->clear();
     // Build a ts-less snapshot for change detection.
     std::string payload = build_metrics_json(/*with_ts=*/false);
     {
@@ -147,7 +128,7 @@ bool MetricsStore::save_metrics(const std::string& path) {
     // Content changed: rebuild with a fresh timestamp and persist.
     // Update the cached payload only after a successful write so that
     // transient write failures are retried on the next interval.
-    bool ok = write_atomic(path, build_metrics_json(/*with_ts=*/true));
+    bool ok = atomic_file::write(path, build_metrics_json(/*with_ts=*/true), error);
     if (ok) {
         std::lock_guard<std::mutex> lk(mutex_);
         last_metrics_payload_ = payload;
@@ -155,7 +136,8 @@ bool MetricsStore::save_metrics(const std::string& path) {
     return ok;
 }
 
-bool MetricsStore::save_health(const std::string& path) {
+bool MetricsStore::save_health(const std::string& path, std::string* error) {
+    if (error) error->clear();
     // Build a ts-less snapshot for change detection.
     std::string payload = build_health_json(/*with_ts=*/false);
     {
@@ -166,7 +148,7 @@ bool MetricsStore::save_health(const std::string& path) {
     // Content changed: rebuild with a fresh timestamp and persist.
     // Update the cached payload only after a successful write so that
     // transient write failures are retried on the next interval.
-    bool ok = write_atomic(path, build_health_json(/*with_ts=*/true));
+    bool ok = atomic_file::write(path, build_health_json(/*with_ts=*/true), error);
     if (ok) {
         std::lock_guard<std::mutex> lk(mutex_);
         last_health_payload_ = payload;
