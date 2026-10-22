@@ -53,8 +53,10 @@ bool write(const std::string& path, const std::string& content) {
             if (!f.is_open()) return false;
             f << content;
             f.flush();
-            if (!f.good()) {
-                f.close();
+            // close() 時にはじめて報告される書き込みエラー (ENOSPC / EIO 等) を
+            // 検出するため、スコープ終了時の暗黙 close に任せず明示的に確認する。
+            f.close();
+            if (f.fail()) {
                 fs::remove(tmp, ec);
                 return false;
             }
