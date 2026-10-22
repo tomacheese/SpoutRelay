@@ -278,6 +278,12 @@ int run_metrics_tests() {
         std::string path = "test_metrics_retry_tmp.json";
         std::remove(path.c_str());
         VERIFY(ms.save_metrics(path));
+        {
+            // 内容が変わらずスキップした場合は、書き込み失敗ではないので error は空
+            std::string skipped_error = "stale";
+            VERIFY(!ms.save_metrics(path, &skipped_error));
+            VERIFY_MSG(skipped_error.empty(), "skip must not report an error");
+        }
         std::string before;
         {
             std::ifstream f(path);
@@ -288,7 +294,9 @@ int run_metrics_tests() {
         // tmp 名をディレクトリにして書き込みを失敗させる
         std::filesystem::create_directory(path + ".tmp");
         ms.set_state("STOPPED");
-        VERIFY_MSG(!ms.save_metrics(path), "save must fail while tmp is blocked");
+        std::string error;
+        VERIFY_MSG(!ms.save_metrics(path, &error), "save must fail while tmp is blocked");
+        VERIFY_MSG(!error.empty(), "error must be reported on write failure");
         {
             std::ifstream f(path);
             std::string after((std::istreambuf_iterator<char>(f)),
@@ -298,7 +306,8 @@ int run_metrics_tests() {
 
         // 障害解消後は同じ内容でも再試行されて保存される
         std::filesystem::remove_all(path + ".tmp");
-        VERIFY_MSG(ms.save_metrics(path), "save must be retried after failure");
+        VERIFY_MSG(ms.save_metrics(path, &error), "save must be retried after failure");
+        VERIFY_MSG(error.empty(), "error must be cleared after recovery");
         std::remove(path.c_str());
         printf("[PASS] save_metrics preserves old file on failure and retries\n");
     }

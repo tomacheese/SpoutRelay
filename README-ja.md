@@ -147,7 +147,7 @@ SpoutRelay/
 │   ├── rtsp/         # FFmpeg RTSP ANNOUNCE/RECORD クライアント
 │   └── spout/        # SpoutDX レシーバー（SpoutMonitor）
 ├── tests/
-│   ├── unit/         # カスタムテストランナーによるユニットテスト（約 97 [PASS]）
+│   ├── unit/         # カスタムテストランナーによるユニットテスト（約 104 [PASS]）
 │   └── spout_test_sender/  # E2E テスト用カラーサイクル DX11 Spout センダー
 ├── e2e-test/         # PowerShell 7+ E2E・モンキーテストスクリプト
 ├── config/
@@ -172,7 +172,7 @@ SpoutRelay/
 
 ```powershell
 build/tests/publisher_tests.exe
-# 期待結果: All tests passed. (97 件の [PASS])
+# 期待結果: All tests passed. (104 件の [PASS])
 ```
 
 テストの分類・実行方法の詳細は [docs/testing.md](docs/testing.md) を参照してください。

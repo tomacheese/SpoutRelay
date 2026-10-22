@@ -150,7 +150,7 @@ SpoutRelay/
 │   ├── rtsp/         # FFmpeg RTSP ANNOUNCE/RECORD client
 │   └── spout/        # SpoutDX receiver (SpoutMonitor)
 ├── tests/
-│   ├── unit/                # Unit tests (custom runner, ~97 PASS)
+│   ├── unit/                # Unit tests (custom runner, ~104 PASS)
 │   └── spout_test_sender/   # Color-cycling DX11 Spout sender for E2E
 ├── e2e-test/                # PowerShell 7+ E2E & monkey-test scripts
 ├── config/
@@ -181,7 +181,7 @@ The test suite uses a custom test runner (no external test framework required).
 # Unit tests (always run after any change)
 cmake --build build --target publisher_tests -j 4
 .\build\tests\publisher_tests.exe
-# Expected output ends with: All tests passed.  (~97 [PASS] lines)
+# Expected output ends with: All tests passed.  (~104 [PASS] lines)
 
 # E2E tests (for state machine / RTSP / encoder changes)
 pwsh e2e-test/run-tests.ps1

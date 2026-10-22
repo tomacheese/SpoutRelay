@@ -2,6 +2,7 @@
 #include "app/supervisor_logic.hpp"
 #include "common/time_utils.hpp"
 #include <algorithm>
+#include <string>
 #include <thread>
 #include <chrono>
 #include <stdexcept>
@@ -1022,19 +1023,39 @@ void Supervisor::metrics_writer_thread_func() {
     time_utils::Stopwatch metrics_sw;
     time_utils::Stopwatch health_sw;
 
+    // 書き込み失敗は、失敗開始時と原因が変わったときだけ記録する (毎間隔のログ氾濫を避ける)。
+    std::string metrics_last_error, health_last_error;
+    auto save = [this](const char* target, const std::string& path,
+                       std::string& last_error, bool is_metrics) {
+        std::string error;
+        bool ok = is_metrics ? metrics_->save_metrics(path, &error)
+                             : metrics_->save_health(path, &error);
+        if (!error.empty()) {
+            if (error != last_error) {
+                log_->log_error("STATE_FILE_WRITE_FAILED", error,
+                                {{"target", target}, {"path", path}});
+                last_error = error;
+            }
+        } else if (ok && !last_error.empty()) {
+            log_->log_event(spdlog::level::info, "state_file_write_recovered",
+                            {{"target", target}, {"path", path}});
+            last_error.clear();
+        }
+    };
+
     while (!shutdown_requested_.load()) {
         if (metrics_sw.expired(config_.runtime.emit_metrics_interval_ms)) {
-            metrics_->save_metrics(config_.app.metrics_path);
+            save("metrics", config_.app.metrics_path, metrics_last_error, true);
             metrics_sw.reset();
         }
         if (health_sw.expired(config_.runtime.emit_health_interval_ms)) {
-            metrics_->save_health(config_.app.health_path);
+            save("health", config_.app.health_path, health_last_error, false);
             health_sw.reset();
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     // Final flush
-    metrics_->save_metrics(config_.app.metrics_path);
-    metrics_->save_health(config_.app.health_path);
+    save("metrics", config_.app.metrics_path, metrics_last_error, true);
+    save("health", config_.app.health_path, health_last_error, false);
 }

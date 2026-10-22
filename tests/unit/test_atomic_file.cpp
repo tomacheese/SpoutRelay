@@ -25,7 +25,9 @@ int run_atomic_file_tests() {
         // 新規作成できること。tmp ファイルが残らないこと
         std::string path = "test_atomic_new_tmp.json";
         std::remove(path.c_str());
-        VERIFY(atomic_file::write(path, "first"));
+        std::string error = "stale";
+        VERIFY(atomic_file::write(path, "first", &error));
+        VERIFY_MSG(error.empty(), "error must be cleared on success");
         VERIFY(read_all(path) == "first");
         VERIFY_MSG(!fs::exists(path + ".tmp"), "tmp must not remain after success");
         std::remove(path.c_str());
@@ -64,7 +66,9 @@ int run_atomic_file_tests() {
         fs::remove_all(path + ".tmp");
         VERIFY(atomic_file::write(path, "old"));
         fs::create_directory(path + ".tmp");
-        VERIFY_MSG(!atomic_file::write(path, "new"), "write must fail");
+        std::string error;
+        VERIFY_MSG(!atomic_file::write(path, "new", &error), "write must fail");
+        VERIFY_MSG(!error.empty(), "error message must be set on failure");
         VERIFY_MSG(read_all(path) == "old", "old content must be preserved");
         fs::remove_all(path + ".tmp");
         std::remove(path.c_str());
@@ -123,7 +127,9 @@ int run_atomic_file_tests() {
         std::string path = "test_atomic_keep_replace_tmp";
         fs::remove_all(path);
         fs::create_directories(path + "/child");
-        VERIFY_MSG(!atomic_file::write(path, "new"), "replace must fail");
+        std::string error;
+        VERIFY_MSG(!atomic_file::write(path, "new", &error), "replace must fail");
+        VERIFY_MSG(!error.empty(), "error message must be set on failure");
         VERIFY_MSG(fs::is_directory(path), "destination must be untouched");
         VERIFY_MSG(!fs::exists(path + ".tmp"), "tmp must be cleaned up on failure");
         fs::remove_all(path);

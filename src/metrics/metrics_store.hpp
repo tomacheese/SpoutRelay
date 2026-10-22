@@ -32,8 +32,10 @@ public:
     // unchanged since the last write (skip) or when a write error occurred.
     // NOTE: these are intentionally non-const because they update the cached
     //       "last written" payload used for diff-skip detection.
-    bool save_metrics(const std::string& path);
-    bool save_health(const std::string& path);
+    // If `error` is non-null, it is set to a non-empty message only when a
+    // write was attempted and failed (cleared otherwise).
+    bool save_metrics(const std::string& path, std::string* error = nullptr);
+    bool save_health(const std::string& path, std::string* error = nullptr);
 
     // Read-only snapshot values
     uint64_t frames_received()         const { return frames_received_.load(); }

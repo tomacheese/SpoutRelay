@@ -31,6 +31,7 @@ SpoutRelay のテストは、以下の 4 つのカテゴリで構成されてい
 | `tests/unit/test_config_loader.cpp` | 設定ファイル (`config.json`) のロード・バリデーションルール (エントリポイント `main()`) |
 | `tests/unit/test_state_machine.cpp` | `StateMachine` の状態遷移ルール (有効/無効な遷移の組み合わせ) |
 | `tests/unit/test_metrics_store.cpp` | `MetricsStore` のメトリクス集計・JSON 出力 |
+| `tests/unit/test_atomic_file.cpp` | `atomic_file::write` のアトミック置換 (旧ファイル保持・tmp 後始末・書き込み/置換失敗時の挙動) |
 | `tests/unit/test_backoff.cpp` | 再接続バックオフ計算ロジック |
 | `tests/unit/test_placeholder_renderer.cpp` | NO SIGNAL プレースホルダ映像の生成ロジック |
 | `tests/unit/test_log_sink.cpp` | JSON Lines ログ出力 (`LogSink`) のフォーマット・エスケープ・エラーハンドリング |
