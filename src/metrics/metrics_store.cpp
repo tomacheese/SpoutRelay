@@ -1,4 +1,5 @@
 #include "metrics/metrics_store.hpp"
+#include "common/atomic_file.hpp"
 #include "common/time_utils.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -116,24 +117,7 @@ std::string MetricsStore::build_health_json(bool with_ts) const {
 }
 
 static bool write_atomic(const std::string& path, const std::string& content) {
-    std::string tmp = path + ".tmp";
-    try {
-        auto parent = fs::path(path).parent_path();
-        if (!parent.empty())
-            fs::create_directories(parent);
-        std::ofstream f(tmp);
-        if (!f.is_open()) return false;
-        f << content;
-        f.close();
-        // std::filesystem::rename does not atomically replace existing files on
-        // Windows. Remove the destination first to avoid failures on second write.
-        if (fs::exists(path))
-            fs::remove(path);
-        fs::rename(tmp, path);
-        return true;
-    } catch (...) {
-        return false;
-    }
+    return atomic_file::write(path, content);
 }
 
 bool MetricsStore::save_metrics(const std::string& path) {

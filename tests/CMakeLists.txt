@@ -4,6 +4,7 @@ add_executable(publisher_tests
     unit/test_config_loader.cpp
     unit/test_state_machine.cpp
     unit/test_metrics_store.cpp
+    unit/test_atomic_file.cpp
     unit/test_backoff.cpp
     unit/test_placeholder_renderer.cpp
     unit/test_log_sink.cpp

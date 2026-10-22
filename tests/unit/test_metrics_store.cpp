@@ -1,6 +1,8 @@
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <iterator>
 #include "metrics/metrics_store.hpp"
 #include "test_utils.hpp"
 
@@ -266,6 +268,39 @@ int run_metrics_tests() {
         f.close();  // Windows では open 中のファイルを std::remove できないため明示的にクローズ
         std::remove(path.c_str());
         printf("[PASS] device_lost_recoveries is included in metrics.json\n");
+    }
+
+    {
+        // 保存失敗時に旧ファイルが失われず、次回リトライで保存されること
+        MetricsStore ms;
+        ms.mark_session_start();
+        ms.set_state("STREAMING");
+        std::string path = "test_metrics_retry_tmp.json";
+        std::remove(path.c_str());
+        VERIFY(ms.save_metrics(path));
+        std::string before;
+        {
+            std::ifstream f(path);
+            before.assign((std::istreambuf_iterator<char>(f)),
+                           std::istreambuf_iterator<char>());
+        }
+
+        // tmp 名をディレクトリにして書き込みを失敗させる
+        std::filesystem::create_directory(path + ".tmp");
+        ms.set_state("STOPPED");
+        VERIFY_MSG(!ms.save_metrics(path), "save must fail while tmp is blocked");
+        {
+            std::ifstream f(path);
+            std::string after((std::istreambuf_iterator<char>(f)),
+                               std::istreambuf_iterator<char>());
+            VERIFY_MSG(after == before, "old metrics.json must be preserved on failure");
+        }
+
+        // 障害解消後は同じ内容でも再試行されて保存される
+        std::filesystem::remove_all(path + ".tmp");
+        VERIFY_MSG(ms.save_metrics(path), "save must be retried after failure");
+        std::remove(path.c_str());
+        printf("[PASS] save_metrics preserves old file on failure and retries\n");
     }
 
     return 0;

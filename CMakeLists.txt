@@ -105,6 +105,7 @@ target_link_libraries(spout2_static PUBLIC
 # publisher_lib: our application code (uses WIN32_LEAN_AND_MEAN)
 # -------------------------------------------------------------------
 set(LIB_SOURCES
+    src/common/atomic_file.cpp
     src/config/config_loader.cpp
     src/app/state_machine.cpp
     src/app/supervisor.cpp
