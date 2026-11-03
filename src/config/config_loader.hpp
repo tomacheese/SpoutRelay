@@ -17,25 +17,25 @@ struct AppConfig {
         int sender_missing_timeout_ms = 800;
         bool prefer_dx11              = true;
 
-        /// @brief STALLED からの RTSP 再接続 (RECONNECTING_OUTPUT) を試みても
-        ///        一度もフレーム受信が回復しないまま連続で何回失敗したら、
-        ///        Spout 受信側 (SpoutMonitor) を含めた完全な再接続
-        ///        (PROBING からのやり直し) を強制するか。0 以下で無効化。
-        ///        (GPU/CPU 受信パス切替時の spoutDX 内部フラグ不整合等、
-        ///        RTSP 層の再接続だけでは解消しない膠着状態への保険的対策)
+        /// @brief Number of consecutive STALLED recoveries (RTSP reconnects via
+        ///        RECONNECTING_OUTPUT) that may fail to restore frame reception before a
+        ///        full reconnect including the Spout receiver (SpoutMonitor) is forced
+        ///        (restart from PROBING). <= 0 disables.
+        ///        Safety net for stuck states that RTSP-layer reconnects cannot fix
+        ///        (e.g. inconsistent spoutDX internal flag after a GPU/CPU path switch).
         int stalled_recovery_max_attempts = 10;
     } spout;
 
-    /// @brief Spout 映像/デバイスが見つからない間に配信する
-    ///        プレースホルダ（NO SIGNAL）映像の設定。
+    /// @brief Settings for the placeholder (NO SIGNAL) video streamed while no Spout
+    ///        source/device is found.
     struct Placeholder {
-        bool enabled               = false;        // 既定で無効（オプトイン）。既存挙動を維持する
-        int  width                 = 1280;         // 直近のソース解像度が不明な場合に使用する幅
-        int  height                = 720;          // 直近のソース解像度が不明な場合に使用する高さ
-        std::string message        = "NO SIGNAL";  // 中央に表示するメッセージ
-        std::string background_hex = "#000000";    // 背景色 (#RRGGBB)
-        std::string text_hex       = "#FFFFFF";    // 文字色 (#RRGGBB)
-        bool show_sender_name      = true;         // 待機中の sender_name をメッセージ下に表示する
+        bool enabled               = false;        // disabled by default (opt-in); preserves existing behavior
+        int  width                 = 1280;         // width used when the last source resolution is unknown
+        int  height                = 720;          // height used when the last source resolution is unknown
+        std::string message        = "NO SIGNAL";  // message shown at the center
+        std::string background_hex = "#000000";    // background color (#RRGGBB)
+        std::string text_hex       = "#FFFFFF";    // text color (#RRGGBB)
+        bool show_sender_name      = true;         // show the awaited sender_name below the message
     } placeholder;
 
     EncoderConfig encoder;

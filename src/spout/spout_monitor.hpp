@@ -15,39 +15,39 @@ public:
     virtual SenderInfo get_sender_info() const = 0;
     virtual bool is_connected() const = 0;
 
-    // --- GPU ゼロコピーパス用 ---
+    // --- For the GPU zero-copy path ---
 
-    /// @brief SpoutDX が保持する ID3D11Device* を返す（型消去済み void*）。
-    ///        EncoderController に渡し、FFmpeg の AVHWDeviceContext を共有する。
-    ///        init() 前は nullptr を返す。
+    /// @brief Returns the ID3D11Device* held by SpoutDX (type-erased void*).
+    ///        Passed to EncoderController so it shares FFmpeg's AVHWDeviceContext.
+    ///        Returns nullptr before init().
     virtual void* gpu_device() = 0;
 
-    /// @brief GPU テクスチャモードを有効/無効にする。
-    ///        有効時は receive_latest_frame() で ReceiveImage() の代わりに
-    ///        ReceiveTexture() を呼び出し、buf.gpu_texture に内部テクスチャ
-    ///        ポインタをセットする（buf.data は空のまま）。
-    ///        無効時は従来の CPU コピーパスを使用する。
+    /// @brief Enables/disables GPU texture mode.
+    ///        When enabled, receive_latest_frame() calls ReceiveTexture() instead of
+    ///        ReceiveImage() and sets the internal texture pointer in buf.gpu_texture
+    ///        (buf.data stays empty).
+    ///        When disabled, the legacy CPU copy path is used.
     virtual void set_gpu_mode(bool enabled) = 0;
 
-    /// @brief 現在接続中の Spout センダーの送出テクスチャ DXGI フォーマット値を返す。
-    ///        接続前や未接続時は 0 を返す。
-    ///        EncoderController::init() に渡すことで、GPU プールのフォーマットを
-    ///        センダーのフォーマットに合わせ CopySubresourceRegion の無音失敗を防ぐ。
-    ///        代表的な値: 28 = DXGI_FORMAT_R8G8B8A8_UNORM (RGBA, Unity/VRChat 等)、
-    ///                    87 = DXGI_FORMAT_B8G8R8A8_UNORM (BGRA, デフォルト)。
+    /// @brief Returns the DXGI format value of the connected Spout sender's texture.
+    ///        Returns 0 before or without a connection.
+    ///        Passed to EncoderController::init() to match the GPU pool format to the
+    ///        sender's, preventing CopySubresourceRegion's silent failure.
+    ///        Typical values: 28 = DXGI_FORMAT_R8G8B8A8_UNORM (RGBA, Unity/VRChat etc.),
+    ///                        87 = DXGI_FORMAT_B8G8R8A8_UNORM (BGRA, default).
     virtual uint32_t get_sender_dxgi_format() const = 0;
 
-    // --- GPU デバイスロスト回復パス用 ---
+    // --- For GPU device-lost recovery ---
 
-    /// @brief D3D11 デバイスがロスト状態かどうかを確認する。
-    ///        GPU TDR 発生時に DXGI_ERROR_DEVICE_REMOVED を検出するために使用する。
-    ///        init() 前または デバイス未取得時は false を返す。
+    /// @brief Checks whether the D3D11 device is in the lost state.
+    ///        Used to detect DXGI_ERROR_DEVICE_REMOVED after a GPU TDR.
+    ///        Returns false before init() or when no device is held.
     virtual bool is_device_removed() const = 0;
 
-    /// @brief D3D11 デバイスを再作成する（GPU TDR 回復用）。
-    ///        CloseDirectX11() → OpenDirectX11() でデバイスを再構築し、
-    ///        マルチスレッド保護を再設定する。
-    ///        成功時 true、失敗時は error にメッセージを格納して false を返す。
+    /// @brief Recreates the D3D11 device (for GPU TDR recovery).
+    ///        Rebuilds the device via CloseDirectX11() -> OpenDirectX11() and
+    ///        re-applies multithread protection.
+    ///        Returns true on success; on failure stores a message in error and returns false.
     virtual bool reinit_device(std::string& error) = 0;
 };
 

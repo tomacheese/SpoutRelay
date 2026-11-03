@@ -1,57 +1,48 @@
 ---
-description: 実装・改修後にユニット/E2E/モンキー/ユーザーテストを網羅的に実施する
+description: Run unit, E2E, monkey and user tests thoroughly after an implementation or change
 ---
 
-# テストの網羅的実施
+# Thorough test run
 
-何らかの実装・改修を行った後は、このコマンドに従って `docs/testing.md` に定義された
-4 つのテストカテゴリ (ユニットテスト / E2E テスト / モンキーテスト / ユーザーテスト) を
-影響範囲に応じて網羅的に実施してください。
+After any implementation or change, follow this command to run the four test categories defined in `docs/testing.md` (unit tests, E2E tests, monkey tests, user tests) according to the impact of the change.
 
-詳細な説明・実行手順・テストシナリオ一覧は [docs/testing.md](../../docs/testing.md) を参照してください。
+For details, procedures and the full scenario list, see [docs/testing.md](../../docs/testing.md).
 
-## 実施手順
+## Steps
 
-1. **影響範囲の特定**
-   - 変更したファイル・モジュールを確認し、`docs/testing.md` のどのテストカテゴリが
-     影響を受けるかを判断する。
+1. **Identify the impact**
+   - Check which files and modules changed and decide which test categories in `docs/testing.md` are affected.
 
-2. **ユニットテストの実行 (必須)**
+2. **Run the unit tests (required)**
    ```powershell
    cmake --build build --target publisher_tests -j 4
    .\build\tests\publisher_tests.exe
    ```
-   - `All tests passed.` が表示されることを確認する。
-   - ロジックを追加・変更した場合は、`tests/unit/` に対応するテストケースを
-     追加・更新し、再度実行して PASS することを確認する。
+   - Confirm that `All tests passed.` is printed.
+   - If you added or changed logic, add or update the matching test cases in `tests/unit/`, then run again and confirm they pass.
 
-3. **E2E テストの実行 (ステートマシン・RTSP 配信・エンコーダーに関わる変更時)**
+3. **Run the E2E tests (for changes to the state machine, RTSP publishing or the encoder)**
    ```powershell
    cd e2e-test
    pwsh ./run-tests.ps1
    pwsh ./monkey-tests.ps1
    ```
-   - すべて `[PASS]` であることを確認する。
+   - Confirm that everything is `[PASS]`.
 
-4. **モンキーテストの追加 (新しい異常系シナリオ・設定オプションを追加した場合)**
-   - `e2e-test/monkey-tests.ps1` に対応するテストケースを追加し、実行して
-     `[PASS]` であることを確認する。
-   - GPU/実 RTSP サーバーが必要で自動化困難な項目は、`docs/testing.md` の
-     「手動で確認すべき追加シナリオ」に追記する。
+4. **Add monkey tests (when adding new abnormal-case scenarios or config options)**
+   - Add the matching test case to `e2e-test/monkey-tests.ps1`, run it and confirm `[PASS]`.
+   - For items that need a GPU or a real RTSP server and are hard to automate, add them to "Additional scenarios to check manually" in `docs/testing.md`.
 
-5. **ユーザーテスト (本番相当の挙動に影響する変更時)**
-   - 実機の Spout ソース・RTSP サーバー (`rtsp://192.168.0.100:8554/spout-test`) で
-     最終確認を行う。
-   - `state/health.json` / `state/metrics.json` / `logs/*.jsonl` の内容を確認する。
+5. **User test (for changes that affect production-like behaviour)**
+   - Do a final check with a real Spout source and an RTSP server (for example `rtsp://192.168.0.100:8554/spout-test`; use your own server address).
+   - Check the contents of `state/health.json`, `state/metrics.json` and `logs/*.jsonl`.
 
-6. **結果の報告**
-   - 実施したテストカテゴリ・件数・結果 (PASS/FAIL) をユーザーに報告する。
-   - `[FAIL]` が発生した場合は、原因を調査し修正した上で再度すべてのテストを実施する。
+6. **Report the results**
+   - Report the test categories run, counts and results (PASS/FAIL) to the user.
+   - If any `[FAIL]` occurs, investigate and fix the cause, then run all the tests again.
 
-## 注意事項
+## Notes
 
-- テストをスキップする・一部のみ実施する場合は、その理由を明示すること。
-- 新しいロジック・分岐・設定項目を追加した場合は、必ず対応するテストケースを
-  追加すること (既存テストが通るだけでは不十分)。
-- センシティブな情報 (実 IP アドレス、認証情報など) をテストコードやログに
-  含めないこと。
+- If you skip tests or run only some of them, state the reason explicitly.
+- When you add new logic, branches or config options, always add the matching test cases (existing tests passing is not enough).
+- Do not put sensitive information (real IP addresses, credentials, etc.) in test code or logs.

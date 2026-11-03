@@ -7,7 +7,7 @@
 
 using json = nlohmann::json;
 
-/// @brief 文字列が "#RRGGBB" 形式の 16 進数カラーコードかどうかを判定する
+/// @brief Returns whether the string is a "#RRGGBB" hex color code
 static bool is_valid_hex_color(const std::string& s) {
     if (s.size() != 7 || s[0] != '#') return false;
     return std::all_of(s.begin() + 1, s.end(), [](unsigned char c) {

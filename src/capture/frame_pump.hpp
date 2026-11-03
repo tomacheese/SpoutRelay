@@ -23,12 +23,12 @@ public:
     int64_t last_frame_time_ms() const { return last_frame_time_ms_.load(); }
 
     /**
-     * @brief Spout ソースが最後に正常応答した時刻 (ms) を返す
+     * @brief Returns the time (ms) the Spout source last responded successfully
      *
-     * is_frame_new の値に関わらず、receive_latest_frame() が ok=true を返した
-     * （Spout が接続されている）直近の時刻。静止画面では新規フレームが来ないため
-     * last_frame_time_ms() は更新されないが、ソースが生きている間はこちらが更新される。
-     * スタール判定にはこちらを使うことで、静止場面での誤 STALLED 遷移を防ぐ。
+     * The last time receive_latest_frame() returned ok=true (Spout connected),
+     * regardless of is_frame_new. A static scene produces no new frames, so
+     * last_frame_time_ms() is not updated, but this keeps advancing while the source
+     * is alive. Use this for stall detection to avoid false STALLED on static scenes.
      */
     int64_t last_source_alive_ms() const { return last_source_alive_ms_.load(); }
 

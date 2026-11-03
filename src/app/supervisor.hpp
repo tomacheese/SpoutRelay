@@ -39,15 +39,15 @@ private:
     void teardown_encoder();
     void teardown_rtsp();
 
-    /// @brief 指定解像度でエンコーダーを初期化し、RTSP クライアントを接続する。
+    /// @brief Initializes the encoder at the given resolution and connects the RTSP client.
     ///
     /// handle_connecting_output() / handle_reconfiguring() / handle_placeholder()
-    /// で重複していたエンコーダー初期化・RTSP 接続処理を共通化したもの。
-    /// 失敗時は呼び出し側で teardown_encoder()/teardown_rtsp() を行うこと。
-    ///
-    /// @param width,height 映像解像度
-    /// @param error 失敗時のエラーメッセージ
-    /// @return 成功時 true
+    /// Shared by handle_connecting_output(), handle_reconfiguring() and handle_placeholder(),
+    /// which previously duplicated this logic. On failure the caller must call
+    /// teardown_encoder()/teardown_rtsp().
+    /// @param width,height video resolution
+    /// @param error error message on failure
+    /// @return true on success
     bool init_encoder_and_rtsp(uint32_t width, uint32_t height, std::string& error);
 
     // Encode/publish thread (H-05)
@@ -85,22 +85,22 @@ private:
     uint32_t current_height_ = 0;
     int reconnect_attempts_  = 0;
 
-    /// @brief STALLED → RECONNECTING_OUTPUT (RTSP のみの再接続) を試みたが、
-    ///        一度も本当の復帰 (handle_stalled() の stall_recovered) に
-    ///        至っていない連続回数。supervisor_logic::should_force_spout_recovery()
-    ///        の判定に使う保険的ウォッチドッグ用カウンター。フレーム受信が実際に
-    ///        回復した場合 (handle_stalled() の stall_recovered) に加え、
-    ///        handle_connecting_output() が STREAMING へ正常遷移した場合にも 0 に戻す。
+    /// @brief Consecutive STALLED -> RECONNECTING_OUTPUT (RTSP-only reconnect) attempts that
+    ///        never led to a real recovery (stall_recovered in handle_stalled()).
+    ///        Safety-net watchdog counter used by
+    ///        supervisor_logic::should_force_spout_recovery(). Reset to 0 when frame
+    ///        reception actually recovers (stall_recovered in handle_stalled()) and also
+    ///        when handle_connecting_output() transitions normally to STREAMING.
     int consecutive_stall_recoveries_ = 0;
 
-    /// @brief 直近に接続した実ソースの解像度。
-    ///        PLACEHOLDER 状態で映像を生成する際、config の既定解像度より
-    ///        この値を優先することで、ソース復帰時の RTSP 再構成を避ける。
+    /// @brief Resolution of the most recently connected real source.
+    ///        Preferred over the configured default when rendering PLACEHOLDER video,
+    ///        to avoid an RTSP reconfiguration when the source returns.
     uint32_t last_source_width_  = 0;
     uint32_t last_source_height_ = 0;
 
-    /// @brief PLACEHOLDER 状態で配信中のフレーム。静止画のため一度だけ生成し、
-    ///        設定 fps で繰り返しエンコードする。
+    /// @brief Frame streamed in the PLACEHOLDER state. A still image, so it is generated
+    ///        once and re-encoded repeatedly at the configured fps.
     FrameBuffer placeholder_frame_;
     FrameMeta   placeholder_meta_{};
     bool        placeholder_active_         = false;
@@ -108,49 +108,48 @@ private:
     time_utils::Stopwatch placeholder_frame_timer_;
     time_utils::Stopwatch placeholder_probe_timer_;
 
-    /// @brief PLACEHOLDER 状態での fps/bitrate 計測用カウンター。
-    ///        encode_publish_thread_func() の同等ロジックと同じ方式で
-    ///        1 秒ごとに metrics へ反映する。
+    /// @brief Counters for fps/bitrate measurement in the PLACEHOLDER state.
+    ///        Reflected into metrics once per second, like the equivalent logic in
+    ///        encode_publish_thread_func().
     uint64_t              placeholder_frames_since_last_ = 0;
     uint64_t              placeholder_bytes_since_last_  = 0;
     time_utils::Stopwatch placeholder_metrics_sw_;
 
-    /// @brief PLACEHOLDER 状態を抜けてから PROBING/CONNECTING_OUTPUT を経て
-    ///        再び PLACEHOLDER へ戻るまでの最小間隔を測るタイマー。
-    ///        ソースが probe には応答するもののフレーム送出が始まらない
-    ///        (CONNECTING_OUTPUT がタイムアウトする) ケースで、
-    ///        PROBING ⇔ PLACEHOLDER 間でエンコーダー/RTSP の再初期化が
-    ///        高頻度に繰り返されることを防ぐ。
+    /// @brief Timer measuring the minimum interval between leaving PLACEHOLDER and
+    ///        returning to it via PROBING/CONNECTING_OUTPUT.
+    ///        When the source answers probes but never starts sending frames
+    ///        (CONNECTING_OUTPUT times out), this prevents the encoder/RTSP from being
+    ///        re-initialized at a high rate in a PROBING <-> PLACEHOLDER loop.
     time_utils::Stopwatch placeholder_cooldown_timer_;
     bool placeholder_cooldown_active_ = false;
 
-    /// @brief PLACEHOLDER ↔ STREAMING シームレス移行フラグ。
+    /// @brief Seamless PLACEHOLDER <-> STREAMING handoff flag.
     ///
-    ///        true のとき、encoder_ と rtsp_client_ は既に初期化済みであり
-    ///        解像度が一致すれば teardown/reinit をスキップして RTSP セッションを
-    ///        維持したまま映像ソースを切り替える。
-    ///        これにより視聴者側での PTS リセット・再バッファリングを防ぐ。
+    ///        When true, encoder_ and rtsp_client_ are already initialized; if the
+    ///        resolution matches, teardown/reinit is skipped and the video source is
+    ///        switched while the RTSP session is kept.
+    ///        This avoids a PTS reset and re-buffering on the viewer side.
     ///
-    ///        セット箇所:
-    ///          - handle_stalled(): 送信元消失 → PLACEHOLDER 遷移時
-    ///          - handle_placeholder(): ソース検出 → CONNECTING_OUTPUT 遷移時
-    ///        クリア箇所:
-    ///          - handle_placeholder() init ブロック
-    ///          - handle_connecting_output() 解像度チェック後
+    ///        Set in:
+    ///          - handle_stalled(): on sender lost -> PLACEHOLDER
+    ///          - handle_placeholder(): on source detected -> CONNECTING_OUTPUT
+    ///        Cleared in:
+    ///          - the init block of handle_placeholder()
+    ///          - handle_connecting_output(), after the resolution check
     bool seamless_handoff_ = false;
 
-    /// @brief handle_connecting_output() で取得した最初のフレーム。
-    ///        encode_publish_thread_func() の初期フリーズフレームとして渡すことで、
-    ///        Spout 送信側が静止画面のまま SendImage() を止めている場合でも
-    ///        ストリームに映像が届くようにする。使用後は解放してメモリを節約する。
+    /// @brief First frame obtained in handle_connecting_output().
+    ///        Passed to encode_publish_thread_func() as the initial freeze frame so the
+    ///        stream carries video even if the Spout sender stopped calling SendImage()
+    ///        on a static scene. Released after use to save memory.
     ///
-    /// @note スレッド安全性:
-    ///       メインスレッドはエンコードスレッド起動前 (start_encode_thread()) に書き込み、
-    ///       エンコードスレッドは起動直後に一度だけ std::move で読み出す。
-    ///       エンコードスレッドが書き戻す場合（RTSP/encode エラーの早期 return）は
-    ///       直後に rtsp_error_flag_/encode_error_flag_ をセットして return するため、
-    ///       メインスレッドは stop_encode_thread() (join) を経由してから参照する。
-    ///       このスレッド間の join による happens-before 関係により、明示的な mutex は不要。
+    /// @note Thread safety:
+    ///       The main thread writes it before starting the encode thread
+    ///       (start_encode_thread()); the encode thread reads it once via std::move right
+    ///       after starting. If the encode thread writes it back (early return on an
+    ///       RTSP/encode error), it sets rtsp_error_flag_/encode_error_flag_ and returns,
+    ///       and the main thread reads it only after stop_encode_thread() (join).
+    ///       The join gives a happens-before relation, so no explicit mutex is needed.
     FrameBuffer initial_frame_buf_;
     FrameMeta   initial_frame_meta_{};
 };

@@ -10,7 +10,7 @@ void FramePump::start(std::shared_ptr<ISpoutMonitor> monitor, int poll_interval_
     if (running_.load()) stop();
     monitor_          = std::move(monitor);
     poll_interval_ms_ = poll_interval_ms;
-    // 起動直後にスタール判定が誤発動しないよう現在時刻で初期化する
+    // Initialize to the current time so stall detection does not fire right after start
     last_source_alive_ms_.store(time_utils::now_ms());
     running_.store(true);
     thread_ = std::thread(&FramePump::capture_thread_func, this);
@@ -60,7 +60,7 @@ void FramePump::capture_thread_func() {
         bool ok     = monitor_->receive_latest_frame(buf, meta, is_new);
 
         if (ok) {
-            // ソースが応答している（静止画面・新規フレーム問わず）→ 生存時刻を更新
+            // The source is responding (static or new frame) -> refresh liveness time
             last_source_alive_ms_.store(time_utils::now_ms());
 
             if (is_new) {

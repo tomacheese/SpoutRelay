@@ -2,7 +2,7 @@
 
 A Windows application that captures frames from a [Spout2](https://spout.zeal.co/) GPU-shared texture sender, encodes them as H.264 via FFmpeg (NVENC → `h264_mf` fallback), and publishes to an RTSP server (e.g. [MediaMTX](https://github.com/bluenviron/mediamtx)).
 
-> 日本語版 README は [README-ja.md](README-ja.md) を参照してください。
+> A Japanese translation is available in [README-ja.md](README-ja.md) (it may lag behind this file).
 
 ## Features
 
@@ -150,13 +150,13 @@ SpoutRelay/
 │   ├── rtsp/         # FFmpeg RTSP ANNOUNCE/RECORD client
 │   └── spout/        # SpoutDX receiver (SpoutMonitor)
 ├── tests/
-│   ├── unit/                # Unit tests (custom runner, ~104 PASS)
+│   ├── unit/                # Unit tests (custom runner)
 │   └── spout_test_sender/   # Color-cycling DX11 Spout sender for E2E
 ├── e2e-test/                # PowerShell 7+ E2E & monkey-test scripts
 ├── config/
 │   ├── config.example.json
 │   └── config.json          # (gitignored, your local config)
-└── docs/                    # Per-category documentation (Japanese)
+└── docs/                    # Per-topic documentation
 ```
 
 ## Documentation
@@ -171,8 +171,6 @@ SpoutRelay/
 | [docs/testing.md](docs/testing.md) | Test categories, test case list, manual scenarios |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Common errors and solutions |
 
-> Documentation in `docs/` is written in Japanese. See [README-ja.md](README-ja.md) for the Japanese README.
-
 ## Running Tests
 
 The test suite uses a custom test runner (no external test framework required).
@@ -181,7 +179,7 @@ The test suite uses a custom test runner (no external test framework required).
 # Unit tests (always run after any change)
 cmake --build build --target publisher_tests -j 4
 .\build\tests\publisher_tests.exe
-# Expected output ends with: All tests passed.  (~104 [PASS] lines)
+# Expected output ends with: All tests passed.  ([PASS] line per check)
 
 # E2E tests (for state machine / RTSP / encoder changes)
 pwsh e2e-test/run-tests.ps1

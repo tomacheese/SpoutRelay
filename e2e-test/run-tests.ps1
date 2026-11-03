@@ -1,6 +1,6 @@
 #requires -Version 7
-# SpoutRelay E2E テストスクリプト (pwsh 7+ 必須)
-# 使い方: cd e2e-test; pwsh ./run-tests.ps1
+# SpoutRelay E2E test script (requires pwsh 7+)
+# Usage: cd e2e-test; pwsh ./run-tests.ps1
 
 $ErrorActionPreference = "Continue"
 $Root       = Split-Path -Parent $PSScriptRoot
@@ -9,7 +9,7 @@ $TestDir    = $PSScriptRoot
 $CaptureDir = "$TestDir\capture"
 $LogDir     = "$TestDir\logs"
 $RTSP       = "rtsp://127.0.0.1:8554/spout-e2e"
-# relay は WorkingDirectory=$TestDir で起動するため logs/ サブディレクトリに書く
+# The relay starts with WorkingDirectory=$TestDir, so it writes under the logs/ subdirectory
 $RelayLog   = "$LogDir\spoutrelay-e2e-test.jsonl"
 
 $PassCount = 0; $FailCount = 0
@@ -25,21 +25,21 @@ function Stop-AllProcs {
     Start-Sleep -Milliseconds 800
 }
 
-# mediamtx を e2e-test ディレクトリから起動する (mediamtx.yml を読ませるため)
+# Start mediamtx from the e2e-test directory (so it reads mediamtx.yml)
 function Start-Mediamtx {
     $p = Start-Process mediamtx -WorkingDirectory $TestDir -PassThru -WindowStyle Hidden
     Start-Sleep -Milliseconds 1200
     return $p
 }
 
-# テスト毎にリレーログを削除して新規エントリだけを見る
+# Delete the relay log before each test so only new entries are seen
 function Clear-RelayLog {
     Remove-Item $RelayLog -Force -EA SilentlyContinue
 }
 
-# ストリーム起動を待つ:
-#   1) リレーログに publish_started が出るまで待つ (ffprobe より信頼性が高い)
-#   2) それでも待てない場合のフォールバックとして ffprobe も試みる
+# Wait for the stream to start:
+#   1) wait until publish_started appears in the relay log (more reliable than ffprobe)
+#   2) also try ffprobe as a fallback if that does not work
 function Wait-Stream {
     param([int]$TimeoutSec = 35)
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
@@ -48,7 +48,7 @@ function Wait-Stream {
         if (Test-Path $RelayLog) {
             $content = Get-Content $RelayLog -Raw -EA SilentlyContinue
             if ($content -match '"event":"publish_started"') {
-                Start-Sleep -Milliseconds 400   # mediamtx がパスを公開するまで少し待つ
+                Start-Sleep -Milliseconds 400   # wait briefly until mediamtx exposes the path
                 return $true
             }
         }
@@ -64,23 +64,23 @@ function Wait-Stream {
 
 function Count-Keyframes {
     param([int]$Seconds = 5)
-    # -show_frames はデコード済みフレーム情報を出力するため、RTSP ストリームで
-    # パケットに keyframe フラグが付かない場合でも I-frame を正確に検出できる。
-    # pict_type 列が "I" (interlaced には非対応だが H.264 では問題なし) であるか、
-    # もしくは key_frame 列 (csv の 4 番目フィールド) が 1 であることで判定する。
+    # -show_frames reports decoded frame info, so I-frames are detected accurately
+    # even when RTSP packets carry no keyframe flag.
+    # Detected when the pict_type column is "I" (not valid for interlaced, but fine for H.264)
+    # or the key_frame column (4th csv field) is 1.
     $out = & ffprobe -v quiet -rtsp_transport tcp -select_streams v:0 `
            -read_intervals "%+$Seconds" -show_frames -of csv $RTSP 2>&1
     return ($out -split "`n" | Where-Object { $_ -match "^frame,video" -and $_ -match ",1," }).Count
 }
 
-# mediamtx 再起動後にリレーが再接続したことを検知する。
-# リレーログの RECONNECTING_OUTPUT→STREAMING イベント数が $BaseCount より増えるまで待つ。
-# (handle_reconnecting_output() は publish_started を再発行しないためこのイベントで判定する)
+# Detect that the relay reconnected after mediamtx restarted.
+# Waits until the RECONNECTING_OUTPUT->STREAMING event count in the relay log exceeds $BaseCount.
+# (handle_reconnecting_output() does not re-emit publish_started, so this event is used)
 #
-# 使い方:
-#   $base = Get-ReconnectCount   # kill 前のカウントを取得
-#   # ... mediamtx を kill・再起動 ...
-#   Wait-Reconnect -BaseCount $base   # kill 後の新規再接続を待つ
+# Usage:
+#   $base = Get-ReconnectCount   # get the count before the kill
+#   # ... kill and restart mediamtx ...
+#   Wait-Reconnect -BaseCount $base   # wait for a new reconnect after the kill
 function Get-ReconnectCount {
     if (-not (Test-Path $RelayLog)) { return 0 }
     $lines = Get-Content $RelayLog -EA SilentlyContinue
@@ -116,7 +116,7 @@ New-Item -ItemType Directory -Force $LogDir     | Out-Null
 New-Item -ItemType Directory -Force "$TestDir\state" | Out-Null
 
 # -----------------------------------------------------------------------
-# Test 1 — Bug #3: RTSP 再接続直後に IDR が送出されるか
+# Test 1 - Bug #3: is an IDR sent right after RTSP reconnect?
 # -----------------------------------------------------------------------
 Write-Host "--- Test 1: IDR after RTSP reconnect (Bug #3) ---"
 
@@ -138,8 +138,8 @@ if (-not (Wait-Stream 35)) {
     Info "Stream live! Stabilising 5s..."
     Start-Sleep -Seconds 5
 
-    # kill 前のカウントを記録しておくことで、kill 前の再接続 (STALLED タイムアウト等)
-    # と kill 後の再接続を明確に区別する
+    # Recording the count before the kill clearly separates reconnects before the kill
+    # (e.g. STALLED timeout) from the one after it
     $baseReconnects = Get-ReconnectCount
 
     Info "Killing mediamtx to force RTSP disconnect..."
@@ -168,7 +168,7 @@ if (-not (Wait-Stream 35)) {
 }
 
 # -----------------------------------------------------------------------
-# Test 2 — Bug #5': 再接続後にフリーズフレームで即ストリーム再開
+# Test 2 - Bug #5': the stream resumes immediately with the freeze frame after reconnect
 # -----------------------------------------------------------------------
 Write-Host "`n--- Test 2: Freeze frame preserved across RTSP reconnect (Bug #5') ---"
 Write-Host "  [Scope] STREAMING->RTSP_ERROR->RECONNECTING path" -ForegroundColor DarkGray
@@ -213,9 +213,9 @@ if (-not (Wait-Stream 35)) {
 }
 
 # -----------------------------------------------------------------------
-# Test 3 — Bug #7: 長時間配信でもストリームが安定継続するか
-# (FFmpeg の RTSP/RTP muxer が RTP タイムスタンプ uint32 ラップを自動処理するため
-#  手動 frame_count リセットは不要。15 秒間エラーなく配信できることを確認する。)
+# Test 3 - Bug #7: does the stream stay stable over a long run?
+# (FFmpeg's RTSP/RTP muxer handles RTP timestamp uint32 wraparound itself, so
+#  no manual frame_count reset is needed. Confirms 15 s of error-free streaming.)
 # -----------------------------------------------------------------------
 Write-Host "`n--- Test 3: Stream stability / no encoder errors over 15s (Bug #7) ---"
 
@@ -232,13 +232,13 @@ if (-not (Wait-Stream 35)) {
 } else {
     Info "Recording 15s to verify stream stability..."
     $cap = Start-Process ffmpeg -ArgumentList "-y","-rtsp_transport","tcp","-i",$RTSP,"-t","15","-c","copy","$CaptureDir\test3.mp4" -PassThru -WindowStyle Hidden
-    # ffmpeg が自然終了するのを待つ (RTSP 接続 + 15s 録画 + moov 書き込み = 最大 25s)
+    # Wait for ffmpeg to exit on its own (RTSP connect + 15s recording + moov write = up to 25s)
     $cap.WaitForExit(25000) | Out-Null
-    $cap | Stop-Process -Force -EA SilentlyContinue  # タイムアウト時の安全策
+    $cap | Stop-Process -Force -EA SilentlyContinue  # safety net on timeout
 
     $dur = (& ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$CaptureDir\test3.mp4" 2>&1) -as [double]
 
-    # リレーの JSONL ログでエンコーダ/RTSP エラーを確認
+    # Check the relay JSONL log for encoder/RTSP errors
     $hasError = $false
     if (Test-Path $RelayLog) {
         $logText  = Get-Content $RelayLog -Raw -EA SilentlyContinue

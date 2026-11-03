@@ -11,7 +11,7 @@
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
-/// @brief ファイル全体を文字列として読み込む
+/// @brief Read the whole file into a string
 static std::string read_file(const std::string& path) {
     std::ifstream f(path);
     std::ostringstream oss;
@@ -19,7 +19,7 @@ static std::string read_file(const std::string& path) {
     return oss.str();
 }
 
-/// @brief JSON Lines のうち最初の非空行を 1 件の JSON として解析する
+/// @brief Parse the first non-empty JSON Lines entry as a single JSON object
 static json parse_first_line(const std::string& content) {
     std::istringstream iss(content);
     std::string line;
@@ -29,7 +29,7 @@ static json parse_first_line(const std::string& content) {
     throw std::runtime_error("no non-empty line found");
 }
 
-/// @brief JSON Lines の最後の非空行を 1 件の JSON として解析する
+/// @brief Parse the last non-empty JSON Lines entry as a single JSON object
 static json parse_last_line(const std::string& content) {
     std::istringstream iss(content);
     std::string line, last;
@@ -47,7 +47,7 @@ int run_log_sink_tests() {
     fs::remove_all(log_dir);
 
     {
-        // init() がログディレクトリとファイルを作成する
+        // init() creates the log directory and file
         LogSink sink;
         std::string err;
         bool ok = sink.init(log_dir, "test-instance", err);
@@ -69,8 +69,8 @@ int run_log_sink_tests() {
     }
 
     {
-        // json_escape: 改行・タブ・バックスラッシュ・ダブルクオートを含む値が
-        // 正しくエスケープされ、パース後に元の文字列へ復元できること
+        // json_escape: values containing newline, tab, backslash and double quote
+        // are escaped correctly and round-trip to the original string after parsing
         fs::remove_all(log_dir);
         LogSink sink;
         std::string err;
@@ -89,7 +89,7 @@ int run_log_sink_tests() {
     }
 
     {
-        // log_error: extra フィールドが code/message とともにマージされること
+        // log_error: the extra fields are merged together with code/message
         fs::remove_all(log_dir);
         LogSink sink;
         std::string err;
@@ -108,7 +108,7 @@ int run_log_sink_tests() {
 
     {
         // log_publish_started / log_reconnect / log_frame_received /
-        // log_encoder_initialized が想定どおりのフィールドを出力すること
+        // log_encoder_initialized emits the expected fields
         fs::remove_all(log_dir);
         LogSink sink;
         std::string err;
@@ -148,7 +148,7 @@ int run_log_sink_tests() {
     }
 
     {
-        // log_publish_stopped が reason フィールドを出力すること
+        // log_publish_stopped emits the reason field
         fs::remove_all(log_dir);
         LogSink sink;
         std::string err;
@@ -165,8 +165,8 @@ int run_log_sink_tests() {
     }
 
     {
-        // ログディレクトリと同名の通常ファイルが既に存在する場合、
-        // ディレクトリ作成に失敗し init() がエラーを返すこと
+        // If a regular file with the same name as the log directory already exists,
+        // directory creation fails and init() returns an error
         const std::string blocked = "test_log_sink_blocked_file";
         fs::remove_all(blocked);
         {

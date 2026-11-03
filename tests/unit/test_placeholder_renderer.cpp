@@ -8,7 +8,7 @@ int run_placeholder_renderer_tests() {
     printf("=== Placeholder Renderer Tests ===\n");
 
     {
-        // 既定設定での描画: サイズ・フォーマットが要求どおりであること
+        // Default config render: size and format are as requested
         AppConfig::Placeholder cfg;
         FrameBuffer frame = render_placeholder_frame(cfg, "MySender", 320, 180);
 
@@ -20,7 +20,7 @@ int run_placeholder_renderer_tests() {
     }
 
     {
-        // 背景色がそのまま四隅ピクセルに反映されること (RGBA バイト順)
+        // Background color is reflected as-is in the four corner pixels (RGBA byte order)
         AppConfig::Placeholder cfg;
         cfg.background_hex  = "#102030";
         cfg.text_hex        = "#FFFFFF";
@@ -34,18 +34,18 @@ int run_placeholder_renderer_tests() {
             return frame.data.data() + (static_cast<size_t>(y) * w + x) * 4;
         };
 
-        // 四隅 (テキスト描画範囲外) は背景色のままであること
+        // The four corners (outside the text area) remain the background color
         for (auto* p : {pixel_at(0, 0), pixel_at(w - 1, 0), pixel_at(0, h - 1), pixel_at(w - 1, h - 1)}) {
             VERIFY(p[0] == 0x10); // R
             VERIFY(p[1] == 0x20); // G
             VERIFY(p[2] == 0x30); // B
-            VERIFY(p[3] == 0xFF); // A (常に不透明)
+            VERIFY(p[3] == 0xFF); // A (always opaque)
         }
         printf("[PASS] corner pixels match background_hex in RGBA order\n");
     }
 
     {
-        // 0x0 解像度では空でないバッファ (size 0) を返し、クラッシュしないこと
+        // A 0x0 resolution returns an empty buffer and does not crash
         AppConfig::Placeholder cfg;
         FrameBuffer frame = render_placeholder_frame(cfg, "MySender", 0, 0);
         VERIFY(frame.data.empty());

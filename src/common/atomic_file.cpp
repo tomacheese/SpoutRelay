@@ -20,7 +20,7 @@ void set_error(std::string* error, const std::string& message) {
 }
 
 #ifdef _WIN32
-// 読み取り側が dest を開いている間に起こりうる、一時的なエラーのみ再試行する。
+// Retry only transient errors that can occur while a reader has dest open.
 bool is_transient_error(DWORD code) {
     return code == ERROR_SHARING_VIOLATION ||
            code == ERROR_LOCK_VIOLATION ||
@@ -28,8 +28,8 @@ bool is_transient_error(DWORD code) {
 }
 #endif
 
-// tmp を dest へ置換する。dest が既に存在しても削除せず、置換に失敗した場合は
-// dest の内容を変更しない。
+// Replaces dest with tmp. An existing dest is not deleted first, and its content is
+// left unchanged if the replacement fails.
 bool replace_file(const fs::path& tmp, const fs::path& dest, std::string* error) {
 #ifdef _WIN32
     constexpr int kMaxAttempts = 5;
@@ -46,7 +46,7 @@ bool replace_file(const fs::path& tmp, const fs::path& dest, std::string* error)
     set_error(error, "MoveFileExW failed (error " + std::to_string(last_error) + ")");
     return false;
 #else
-    // POSIX の rename(2) は既存ファイルをアトミックに置換する。
+    // POSIX rename(2) atomically replaces an existing file.
     std::error_code ec;
     fs::rename(tmp, dest, ec);
     if (ec) {
@@ -72,14 +72,14 @@ bool write(const std::string& path, const std::string& content, std::string* err
         {
             std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
             if (!f.is_open()) {
-                // tmp の位置に既存のファイルやディレクトリがありうるため削除しない
+                // Do not delete: tmp may already be an existing file or directory
                 set_error(error, "failed to open " + tmp.string());
                 return false;
             }
             f << content;
             f.flush();
-            // flush / close で報告される書き込みエラー (ENOSPC / EIO 等) を
-            // 検出するため、暗黙の close に任せず明示的に確認する。
+            // Check explicitly instead of relying on the implicit close, so write
+            // errors reported at flush/close (ENOSPC / EIO etc.) are detected.
             f.close();
             if (f.fail()) {
                 fs::remove(tmp, ec);
@@ -89,7 +89,7 @@ bool write(const std::string& path, const std::string& content, std::string* err
         }
 
         if (!replace_file(tmp, dest, error)) {
-            fs::remove(tmp, ec);   // 旧ファイルは保持したまま tmp のみ破棄する
+            fs::remove(tmp, ec);   // discard only tmp; the old file is kept
             return false;
         }
         return true;

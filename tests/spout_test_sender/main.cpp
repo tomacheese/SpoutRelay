@@ -17,9 +17,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 前回実行で force-kill されたセンダーが Spout 名前リストに残っている場合、
-    // SetSenderName() がインクリメント済み名前 (TestSpoutSender_1) を使うため
-    // リレーが名前を見つけられなくなる。事前に孤立エントリを一掃しておく。
+    // If a sender force-killed in a previous run is still in the Spout name list,
+    // SetSenderName() picks the incremented name (TestSpoutSender_1) and
+    // the relay can no longer find the sender. Clear orphaned entries first.
     sender.sendernames.CleanSenders();
     sender.SetSenderName(name);
     printf("[sender] Sending as '%s' (%ux%u)...\n", name, W, H);

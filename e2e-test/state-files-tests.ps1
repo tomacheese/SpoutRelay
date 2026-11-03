@@ -1,9 +1,9 @@
 #requires -Version 7
-# SpoutRelay state/health.json・state/metrics.json E2E テストスクリプト (pwsh 7+ 必須)
-# 使い方: cd e2e-test; pwsh ./state-files-tests.ps1
+# SpoutRelay state/health.json and state/metrics.json E2E test script (requires pwsh 7+)
+# Usage: cd e2e-test; pwsh ./state-files-tests.ps1
 #
-# MetricsStore が出力する state/health.json と state/metrics.json の
-# JSON 構造・値を実際のリレー実行を通じて直接検証する。
+# Directly verifies the JSON structure and values of state/health.json and
+# state/metrics.json written by MetricsStore, through real relay runs.
 
 $ErrorActionPreference = "Continue"
 $Root       = Split-Path -Parent $PSScriptRoot
@@ -57,7 +57,7 @@ function Wait-LogEvent {
     return $false
 }
 
-# 指定したファイルが「存在し」かつ「有効な JSON としてパース可能」になるまで待つ
+# Wait until the given file exists and parses as valid JSON
 function Wait-JsonFile {
     param([string]$Path, [int]$TimeoutSec = 15)
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
@@ -69,7 +69,7 @@ function Wait-JsonFile {
                     return ($content | ConvertFrom-Json -EA Stop)
                 }
             } catch {
-                # 書き込み中で不完全な場合があるためリトライ
+                # May be incomplete while being written, so retry
             }
         }
         Start-Sleep -Milliseconds 300
@@ -89,14 +89,14 @@ New-Item -ItemType Directory -Force $LogDir     | Out-Null
 New-Item -ItemType Directory -Force $StateDir   | Out-Null
 
 # -----------------------------------------------------------------------
-# Test 1 — PLACEHOLDER 配信中の health.json / metrics.json
+# Test 1 - health.json / metrics.json while streaming PLACEHOLDER
 # -----------------------------------------------------------------------
 Write-Host "--- Test 1: health.json / metrics.json during PLACEHOLDER streaming ---"
 & {
     Clear-RelayLog
     Clear-StateFiles
     $mtx = Start-Mediamtx
-    # sender を起動せずに起動 → PLACEHOLDER (NO SIGNAL) へ遷移するはず
+    # Start without a sender -> should transition to PLACEHOLDER (NO SIGNAL)
     $relay = Start-Process -FilePath "$BuildDir\spout-relay.exe" -ArgumentList "--config","$TestDir\config\config_placeholder.json" -WorkingDirectory $TestDir -PassThru -WindowStyle Hidden
 
     Info "Waiting for placeholder_started event (up to 20s)..."
@@ -108,8 +108,8 @@ Write-Host "--- Test 1: health.json / metrics.json during PLACEHOLDER streaming 
         return
     }
 
-    # emit_health_interval_ms / emit_metrics_interval_ms (=500ms) より長く待ち、
-    # 確実に health.json / metrics.json が書き出されるようにする
+    # Wait longer than emit_health_interval_ms / emit_metrics_interval_ms (=500ms)
+    # so health.json / metrics.json are surely written
     Start-Sleep -Milliseconds 1500
 
     $health = Wait-JsonFile -Path $HealthFile -TimeoutSec 15
@@ -199,7 +199,7 @@ Write-Host "--- Test 1: health.json / metrics.json during PLACEHOLDER streaming 
 }
 
 # -----------------------------------------------------------------------
-# Test 2 — FATAL 遷移後の health.json (healthy == false)
+# Test 2 - health.json after the FATAL transition (healthy == false)
 # -----------------------------------------------------------------------
 Write-Host "`n--- Test 2: health.json reflects healthy=false after FATAL ---"
 & {

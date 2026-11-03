@@ -1,7 +1,7 @@
-// 静的フリーズフレームテスト用 Spout 送信側
-// 3 秒間だけフレームを送信し、その後は SendImage を止めて
-// スリープし続ける（接続は維持したまま）。
-// SpoutRelay がフリーズフレームを正しく送信し続けるか確認するのに使う。
+// Spout sender for the static freeze-frame test.
+// Sends frames for the first 10 seconds, then stops calling SendImage
+// and just sleeps (the connection stays up).
+// Used to check that SpoutRelay keeps sending the freeze frame correctly.
 #include <windows.h>
 #include <cstdio>
 #include <vector>
@@ -17,13 +17,13 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "[static_sender] Failed to open DirectX11\n");
         return 1;
     }
-    // 前回実行で force-kill されたセンダーが Spout 名前リストに残っている場合、
-    // SetSenderName() がインクリメント済み名前 (TestSpoutSender_1) を使うため
-    // リレーが名前を見つけられなくなる。事前に孤立エントリを一掃しておく。
+    // If a sender force-killed in a previous run is still in the Spout name list,
+    // SetSenderName() picks the incremented name (TestSpoutSender_1) and
+    // the relay can no longer find the sender. Clear orphaned entries first.
     sender.sendernames.CleanSenders();
     sender.SetSenderName(name);
 
-    // 原色の赤（RGBA）で固定フレームを作る
+    // Build a fixed frame in primary red (RGBA)
     std::vector<unsigned char> buf(static_cast<size_t>(W) * H * 4);
     for (unsigned int i = 0; i < W * H; i++) {
         buf[i * 4 + 0] = 220;  // R
@@ -31,7 +31,7 @@ int main(int argc, char* argv[]) {
         buf[i * 4 + 2] = 50;   // B
         buf[i * 4 + 3] = 255;  // A
     }
-    // 左上にフレーム番号インジケーター（白のグラデーションバー）
+    // Frame-number indicator at top-left (white gradient bar)
     for (unsigned int y = 0; y < 20 && y < H; y++)
         for (unsigned int x = 0; x < 120 && x < W; x++) {
             unsigned int idx = (y * W + x) * 4;
@@ -40,10 +40,10 @@ int main(int argc, char* argv[]) {
             buf[idx + 3] = 255;
         }
 
-    // フェーズ 1: 10 秒間フレームを送信する（SpoutRelay 起動・接続の猶予を十分に確保）
+    // Phase 1: send frames for 10 seconds (ample time for SpoutRelay to start and connect)
     printf("[static_sender] Sending as '%s' (%ux%u) — 10 sec of frames...\n",
            name, W, H);
-    for (int f = 0; f < 300; f++) {  // 30fps × 10s = 300 フレーム
+    for (int f = 0; f < 300; f++) {  // 30fps x 10s = 300 frames
         if (!sender.SendImage(buf.data(), W, H))
             fprintf(stderr, "[static_sender] SendImage failed at frame %d\n", f);
         if (f % 10 == 0)
@@ -51,11 +51,11 @@ int main(int argc, char* argv[]) {
         Sleep(33);
     }
 
-    // フェーズ 2: SendImage を止めて接続だけ維持（IsConnected() = true のまま）
+    // Phase 2: stop SendImage but keep the connection (IsConnected() stays true)
     printf("\n[static_sender] Stopped sending. Holding connection for 30 sec...\n");
     printf("[static_sender] SpoutRelay should keep streaming the last red frame.\n");
     fflush(stdout);
-    Sleep(30000);  // 30 秒待機
+    Sleep(30000);  // wait 30 seconds
 
     printf("[static_sender] Exiting.\n");
     sender.ReleaseSender();

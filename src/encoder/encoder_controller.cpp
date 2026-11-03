@@ -25,15 +25,15 @@ struct EncoderController::Impl {
     int64_t          frame_count = 0;
     std::string      codec_name;
 
-    bool             force_next_idr = false;  ///< 次フレームを IDR として強制出力するフラグ
+    bool             force_next_idr = false;  ///< force the next frame out as an IDR
 
-    // --- GPU ゼロコピーパス ---
+    // --- GPU zero-copy path ---
     bool             gpu_path     = false;
     AVBufferRef*     hw_device_ctx = nullptr;
     AVBufferRef*     hw_frames_ctx = nullptr;
-    AVFrame*         last_hw_frame = nullptr; ///< content_changed=false 時に再利用する HW フレーム
-    ID3D11DeviceContext* d3d_ctx   = nullptr; ///< CopySubresourceRegion 用（借用）
-    ID3D11Device*    d3d_device    = nullptr; ///< デバイスロスト検出用（AddRef 保持）
+    AVFrame*         last_hw_frame = nullptr; ///< HW frame reused when content_changed=false
+    ID3D11DeviceContext* d3d_ctx   = nullptr; ///< for CopySubresourceRegion (borrowed)
+    ID3D11Device*    d3d_device    = nullptr; ///< for device-lost detection (AddRef held)
 };
 
 EncoderController::EncoderController()
@@ -60,9 +60,9 @@ static AVPixelFormat pick_pix_fmt(const AVCodec* codec) {
 }
 
 // ---------------------------------------------------------------------------
-// GPU ゼロコピーパス初期化ヘルパー
-// 成功時 true を返し codec_ctx->hw_frames_ctx をセットする。
-// 失敗時は確保済みリソースを解放して false を返す（CPU フォールバック用）。
+// GPU zero-copy path initialization helper.
+// On success returns true and sets codec_ctx->hw_frames_ctx.
+// On failure releases acquired resources and returns false (caller falls back to CPU).
 // ---------------------------------------------------------------------------
 static bool try_init_gpu_path(AVCodecContext* ctx,
                               void* raw_device,
@@ -75,17 +75,17 @@ static bool try_init_gpu_path(AVCodecContext* ctx,
     auto* d3d11dev = static_cast<ID3D11Device*>(raw_device);
     if (!d3d11dev) return false;
 
-    // 1. FFmpeg HW デバイスコンテキストを既存の D3D11 デバイスでラップする
+    // 1. Wrap the existing D3D11 device in an FFmpeg HW device context
     AVBufferRef* hw_dev_ctx = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA);
     if (!hw_dev_ctx) return false;
 
     auto* dev_ctx  = reinterpret_cast<AVHWDeviceContext*>(hw_dev_ctx->data);
     auto* d3d11ctx = static_cast<AVD3D11VADeviceContext*>(dev_ctx->hwctx);
 
-    d3d11dev->AddRef();               // FFmpeg が Release するため
+    d3d11dev->AddRef();               // FFmpeg will Release it
     d3d11ctx->device = d3d11dev;
 
-    // D3D11 デバイスコンテキストを取得して保存（CopySubresourceRegion 用）
+    // Get and save the D3D11 device context (for CopySubresourceRegion)
     d3d11dev->GetImmediateContext(out_d3d_ctx);
 
     if (av_hwdevice_ctx_init(hw_dev_ctx) < 0) {
@@ -94,8 +94,8 @@ static bool try_init_gpu_path(AVCodecContext* ctx,
         return false;
     }
 
-    // 2. HW フレームコンテキストを構築する
-    //    format=D3D11, sw_format=BGRA → DXGI_FORMAT_B8G8R8A8_UNORM
+    // 2. Build the HW frame context
+    //    format=D3D11, sw_format=BGRA -> DXGI_FORMAT_B8G8R8A8_UNORM
     AVBufferRef* hw_frm_ctx = av_hwframe_ctx_alloc(hw_dev_ctx);
     if (!hw_frm_ctx) {
         av_buffer_unref(&hw_dev_ctx);
@@ -105,18 +105,18 @@ static bool try_init_gpu_path(AVCodecContext* ctx,
 
     auto* frm_ctx          = reinterpret_cast<AVHWFramesContext*>(hw_frm_ctx->data);
     frm_ctx->format         = AV_PIX_FMT_D3D11;
-    // センダーの実フォーマットに合わせて sw_format を設定する。
-    // sw_format はプールテクスチャの DXGI フォーマットと対応する:
-    //   AV_PIX_FMT_BGRA → DXGI_FORMAT_B8G8R8A8_UNORM (87)
-    //   AV_PIX_FMT_RGBA → DXGI_FORMAT_R8G8B8A8_UNORM (28)
-    // CopySubresourceRegion はフォーマット不一致時に戻り値もエラーも返さず無音で失敗するため、
-    // センダーフォーマットと一致したプールを用意することが正しい映像出力の必要条件。
-    // AV_PIX_FMT_RGBA が FFmpeg/NVENC でサポートされない場合は av_hwframe_ctx_init() が失敗し、
-    // 呼び出し元が CPU パスへフォールバックする。
+    // Set sw_format to match the sender's actual format.
+    // sw_format corresponds to the pool texture's DXGI format:
+    //   AV_PIX_FMT_BGRA -> DXGI_FORMAT_B8G8R8A8_UNORM
+    //   AV_PIX_FMT_RGBA -> DXGI_FORMAT_R8G8B8A8_UNORM
+    // CopySubresourceRegion fails silently (no return value or error) on a format
+    // mismatch, so the pool must match the sender format for correct output.
+    // If FFmpeg/NVENC does not support AV_PIX_FMT_RGBA, av_hwframe_ctx_init() fails
+    // and the caller falls back to the CPU path.
     frm_ctx->sw_format      = sw_fmt;
     frm_ctx->width          = static_cast<int>(width);
     frm_ctx->height         = static_cast<int>(height);
-    frm_ctx->initial_pool_size = 4;  // ラウンドロビン用プール
+    frm_ctx->initial_pool_size = 4;  // pool for round-robin
 
     if (av_hwframe_ctx_init(hw_frm_ctx) < 0) {
         av_buffer_unref(&hw_frm_ctx);
@@ -125,7 +125,7 @@ static bool try_init_gpu_path(AVCodecContext* ctx,
         return false;
     }
 
-    // 3. コーデックコンテキストに HW フレームコンテキストを設定する
+    // 3. Set the HW frame context on the codec context
     ctx->hw_frames_ctx = av_buffer_ref(hw_frm_ctx);
     ctx->pix_fmt       = AV_PIX_FMT_D3D11;
 
@@ -169,10 +169,10 @@ bool EncoderController::init(const EncoderConfig& config,
         ctx->pix_fmt      = pick_pix_fmt(codec);
         if (config.threads > 0) ctx->thread_count = config.threads;
 
-        // Spout 入力は常に PC モニター由来の sRGB (full range) なので、
-        // 解像度によらず BT.709 で統一する。
-        // color_range は JPEG (full range, 0-255) として宣言し、
-        // sws にも full range 出力を指示することで精度損失を最小化する。
+        // Spout input always comes from a PC monitor (sRGB, full range), so use
+        // BT.709 regardless of resolution.
+        // Declare color_range as JPEG (full range, 0-255) and tell sws to output
+        // full range too, to minimize precision loss.
         ctx->color_range     = AVCOL_RANGE_JPEG;
         ctx->colorspace      = AVCOL_SPC_BT709;
         ctx->color_primaries = AVCOL_PRI_BT709;
@@ -182,20 +182,20 @@ bool EncoderController::init(const EncoderConfig& config,
                             codec_name.find("amf")   != std::string::npos ||
                             codec_name.find("qsv")   != std::string::npos);
 
-        // GPU ゼロコピーパスの試行: HW コーデック かつ D3D11 デバイスが利用可能な場合のみ
+        // Try the GPU zero-copy path only for a HW codec with a D3D11 device available
         bool gpu_init_ok = false;
         AVBufferRef* hw_device_ctx_tmp = nullptr;
         AVBufferRef* hw_frames_ctx_tmp = nullptr;
         ID3D11DeviceContext* d3d_ctx_tmp = nullptr;
 
         if (is_hw_codec && d3d_device) {
-            // センダーの DXGI フォーマットに合わせて GPU プールの sw_format を選択する。
-            // CopySubresourceRegion はフォーマット不一致時に戻り値もエラーも返さず無音で失敗するため、
-            // センダーが DXGI_FORMAT_R8G8B8A8_UNORM (RGBA) なら AV_PIX_FMT_RGBA を試みる。
-            // AV_PIX_FMT_RGBA が FFmpeg D3D11VA で未サポートの場合は av_hwframe_ctx_init() が
-            // 失敗し、以下のブロックで CPU パスへ自動フォールバックする。
-            // 0 (未指定) または DXGI_FORMAT_B8G8R8A8_UNORM は従来通り AV_PIX_FMT_BGRA を使用する。
-            AVPixelFormat gpu_sw_fmt = AV_PIX_FMT_BGRA;  // デフォルト: BGRA
+            // Choose the GPU pool's sw_format to match the sender's DXGI format.
+            // CopySubresourceRegion fails silently on a format mismatch, so if the
+            // sender is DXGI_FORMAT_R8G8B8A8_UNORM (RGBA), try AV_PIX_FMT_RGBA.
+            // If D3D11VA does not support it, av_hwframe_ctx_init() fails and the block
+            // below falls back to the CPU path.
+            // 0 (unspecified) or DXGI_FORMAT_B8G8R8A8_UNORM uses AV_PIX_FMT_BGRA as before.
+            AVPixelFormat gpu_sw_fmt = AV_PIX_FMT_BGRA;  // default: BGRA
             if (sender_dxgi_format == DXGI_FORMAT_R8G8B8A8_UNORM) {
                 gpu_sw_fmt = AV_PIX_FMT_RGBA;
             }
@@ -218,9 +218,9 @@ bool EncoderController::init(const EncoderConfig& config,
             if (!config.tune.empty())
                 av_dict_set(&opts, "tune", config.tune.c_str(), 0);
         } else {
-            // NVENC/AMF/QSV 低遅延設定
-            // GPU パスでは tune=zerolatency が NVENC と非互換になるケースがあるため
-            // 明示的にスキップする（issue #14 制約）
+            // NVENC/AMF/QSV low-latency settings
+            // tune=zerolatency can be incompatible with NVENC on the GPU path,
+            // so it is skipped explicitly
             av_dict_set(&opts, "rc", "cbr", 0);
             av_dict_set(&opts, "delay", "0", 0);
         }
@@ -244,13 +244,13 @@ bool EncoderController::init(const EncoderConfig& config,
         impl_->codec_name = codec_name;
 
         if (gpu_init_ok) {
-            // GPU ゼロコピーパス確立
+            // GPU zero-copy path established
             impl_->gpu_path       = true;
             impl_->hw_device_ctx  = hw_device_ctx_tmp;
             impl_->hw_frames_ctx  = hw_frames_ctx_tmp;
             impl_->d3d_ctx        = d3d_ctx_tmp;
-            // デバイスロスト検出用にポインタを AddRef して保持する。
-            // reset() で Release する。
+            // Keep an AddRef'd pointer for device-lost detection.
+            // Released in reset().
             auto* d3d11dev = static_cast<ID3D11Device*>(d3d_device);
             if (d3d11dev) {
                 d3d11dev->AddRef();
@@ -273,9 +273,9 @@ bool EncoderController::init(const EncoderConfig& config,
             return true;
         }
 
-        // GPU 初期化不要 or 失敗 → CPU パスにフォールバック
-        // hw_frames_ctx は try_init_gpu_path 内で解放済み（失敗時）か
-        // 上で unref 済みなので、ここでは ctx->hw_frames_ctx が残っていれば解放する。
+        // GPU init not needed or failed -> fall back to the CPU path
+        // hw_frames_ctx was released inside try_init_gpu_path (on failure) or unref'd
+        // above, so release ctx->hw_frames_ctx here if it remains.
         if (ctx->hw_frames_ctx) {
             av_buffer_unref(&ctx->hw_frames_ctx);
             ctx->hw_frames_ctx = nullptr;
@@ -294,12 +294,12 @@ bool EncoderController::init(const EncoderConfig& config,
             continue;
         }
 
-        // BT.709 変換行列と full range を明示的に設定する
-        // 入力 RGBA は full range (JPEG)、出力 YUV も full range で統一する
+        // Explicitly set the BT.709 matrix and full range.
+        // Input RGBA is full range (JPEG); output YUV is also full range.
         {
             const int* in_coeff  = sws_getCoefficients(SWS_CS_DEFAULT);
             const int* out_coeff = sws_getCoefficients(SWS_CS_ITU709);
-            // srcRange=1: full range 入力、dstRange=1: full range 出力
+            // srcRange=1: full range input, dstRange=1: full range output
             int sws_ret = sws_setColorspaceDetails(impl_->sws_ctx,
                 in_coeff,  1,
                 out_coeff, 1,
@@ -376,16 +376,16 @@ bool EncoderController::encode(const FrameBuffer& frame,
                                 bool content_changed) {
     if (!impl_->codec_ctx) return false;
 
-    // --- GPU ゼロコピーパス ---
+    // --- GPU zero-copy path ---
     if (impl_->gpu_path) {
-        // CopySubresourceRegion の前にデバイスロストを確認する。
-        // デバイスロスト時はアクセス違反が発生する前に安全に脱出する。
+        // Check for device loss before CopySubresourceRegion;
+        // bail out safely before an access violation can occur.
         if (impl_->d3d_device &&
             impl_->d3d_device->GetDeviceRemovedReason() != S_OK) {
             return false;
         }
 
-        // gpu_texture が null だが CPU データもない不正フレームはスキップする
+        // Skip invalid frames with a null gpu_texture and no CPU data
         if (!frame.gpu_texture && frame.data.empty()) return true;
 
         bool need_copy = (content_changed || impl_->frame_count == 0 ||
@@ -393,7 +393,6 @@ bool EncoderController::encode(const FrameBuffer& frame,
                           !impl_->last_hw_frame->buf[0]);
 
         if (need_copy) {
-            // プールから新規 HW フレームを取得する
             AVFrame* hw_frame = av_frame_alloc();
             if (!hw_frame) return false;
 
@@ -402,32 +401,23 @@ bool EncoderController::encode(const FrameBuffer& frame,
                 return false;
             }
 
-            // D3D11 プールテクスチャを取り出す
             auto* pool_tex   = reinterpret_cast<ID3D11Texture2D*>(hw_frame->data[0]);
             auto  pool_index = static_cast<UINT>(reinterpret_cast<intptr_t>(hw_frame->data[1]));
 
             if (frame.gpu_texture) {
-                // GPU テクスチャが利用可能: CopySubresourceRegion でゼロコピー転送
+                // GPU texture available: zero-copy transfer via CopySubresourceRegion
                 auto* src_tex = static_cast<ID3D11Texture2D*>(frame.gpu_texture);
                 impl_->d3d_ctx->CopySubresourceRegion(
                     pool_tex, pool_index, 0, 0, 0,
                     src_tex, 0, nullptr);
             } else {
-                // CPU フォールバック: UpdateSubresource で CPU データを転送する。
+                // CPU fallback: transfer CPU data via UpdateSubresource.
                 //
-                // 通常、GPU ゼロコピーパスが有効な場合 SpoutMonitor::receive_latest_frame()
-                // は GPU モード (set_gpu_mode(true)) で動作するため、buf.data.clear() により
-                // frame.data は常に空になる。frame.data が空かつ gpu_texture が null の場合は
-                // encode() 冒頭の早期 return (frame.data.empty() && !frame.gpu_texture) で
-                // スキップされるため、このブランチは通常到達しない。
-                //
-                // このブランチに到達するとしたら SpoutMonitor が CPU モードのまま encode()
-                // に渡された場合だが、その場合 gpu_path_active() == true であれば
-                // frame.data の内容がプールの DXGI フォーマットと一致している必要がある。
-                // SpoutMonitor CPU パスは常に RGBA を返すため、プールが BGRA の場合は
-                // R/B が入れ替わった色化けが発生しうる。GPU モードの切り替えは
-                // supervisor.cpp で gpu_path_active() 確認後に行われているため、
-                // 正常なコードパスでは本ブランチでの不一致は発生しない。
+                // Normally unreachable: with the GPU path active, SpoutMonitor runs in GPU mode
+                // (set_gpu_mode(true)), so frame.data is empty, and a frame with empty data and
+                // no gpu_texture returns early at the top of encode().
+                // If reached, frame.data must match the pool's DXGI format; the CPU path
+                // always yields RGBA, so a BGRA pool would swap R/B.
                 D3D11_BOX box{};
                 box.left   = 0;
                 box.top    = 0;
@@ -435,7 +425,7 @@ bool EncoderController::encode(const FrameBuffer& frame,
                 box.right  = frame.width;
                 box.bottom = frame.height;
                 box.back   = 1;
-                UINT row_pitch = frame.width * 4;  // 4 bytes/pixel (RGBA/BGRA 共通)
+                UINT row_pitch = frame.width * 4;  // 4 bytes/pixel (RGBA/BGRA)
                 if (row_pitch == 0) {
                     av_frame_free(&hw_frame);
                     return false;
@@ -445,7 +435,7 @@ bool EncoderController::encode(const FrameBuffer& frame,
                     frame.data.data(), row_pitch, 0);
             }
 
-            // last_hw_frame に保存して content_changed=false 時に再利用する
+            // Save to last_hw_frame for reuse when content_changed=false
             av_frame_unref(impl_->last_hw_frame);
             if (av_frame_ref(impl_->last_hw_frame, hw_frame) < 0) {
                 av_frame_free(&hw_frame);
@@ -454,7 +444,7 @@ bool EncoderController::encode(const FrameBuffer& frame,
             av_frame_free(&hw_frame);
         }
 
-        // エンコード用に last_hw_frame の参照コピーを作成する
+        // Make a reference copy of last_hw_frame for encoding
         AVFrame* send_frame = av_frame_alloc();
         if (!send_frame) return false;
         if (av_frame_ref(send_frame, impl_->last_hw_frame) < 0) {
@@ -474,15 +464,15 @@ bool EncoderController::encode(const FrameBuffer& frame,
         return drain_encoder(impl_->codec_ctx, impl_->pkt, out_packets, config_.fps);
     }
 
-    // --- CPU パス（従来動作）---
+    // --- CPU path (legacy behavior) ---
     if (!impl_->sws_ctx || !impl_->yuv_frame) return false;
 
-    // ピクセル内容が変化している場合のみ RGBA→YUV 変換 (sws_scale) を実行する。
+    // Run RGBA->YUV conversion (sws_scale) only when the pixel content changed.
     //
-    // 静止画面のフリーズフレーム再送時は同一の RGBA データを設定 fps で繰り返し
-    // エンコードするが、変換結果も毎回同一になる。sws_scale は解像度に比例した
-    // CPU コストがかかるため、直前の変換済み YUV フレームをそのまま再利用する
-    // ことで変換コストを排除しつつエンコーダーへは新しい PTS でフレームを送り続ける。
+    // Resending a static freeze frame encodes identical RGBA data at the configured
+    // fps, so the conversion result is identical each time. sws_scale costs CPU
+    // proportional to resolution, so reuse the previous YUV frame and still feed
+    // the encoder with a new PTS.
     if (content_changed || impl_->frame_count == 0) {
         // Convert RGBA → codec pixel format (SpoutDX ReceiveImage with bRGB=false outputs RGBA)
         const uint8_t* in_data[1]  = { frame.data.data() };
@@ -495,15 +485,15 @@ bool EncoderController::encode(const FrameBuffer& frame,
                   impl_->yuv_frame->data, impl_->yuv_frame->linesize);
     }
 
-    // PTS は単調増加フレームカウンタ。
-    // FFmpeg の RTSP/RTP muxer は内部で RTP タイムスタンプを uint32_t に
-    // 自然切り捨てするため、32-bit オーバーフローは muxer 側で自動処理される。
-    // 手動で frame_count を 0 にリセットすると NVENC が単調増加制約違反で
-    // ENCODER_ENCODE_FAILED を返すため、リセットは行わない。
+    // PTS is a monotonically increasing frame counter.
+    // FFmpeg's RTSP/RTP muxer truncates RTP timestamps to uint32_t naturally, so
+    // 32-bit overflow is handled by the muxer.
+    // Do not reset frame_count to 0: NVENC returns ENCODER_ENCODE_FAILED for
+    // violating the monotonic-increase constraint.
     impl_->yuv_frame->pts = impl_->frame_count++;
 
-    // IDR 強制フラグが立っている場合はキーフレームを要求し、フラグを消費する。
-    // RTSP 再接続後に即座に完全フレームが届くようにするため。
+    // If the force-IDR flag is set, request a keyframe and consume the flag,
+    // so a full frame arrives right after an RTSP reconnect.
     impl_->yuv_frame->pict_type = impl_->force_next_idr
         ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
     impl_->force_next_idr = false;

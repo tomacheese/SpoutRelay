@@ -6,8 +6,8 @@
 
 namespace {
 
-/// @brief "#RRGGBB" 形式の文字列を COLORREF に変換する。
-///        不正な形式の場合は黒 (#000000) を返す。
+/// @brief Converts a "#RRGGBB" string to a COLORREF.
+///        Returns black (#000000) for a malformed string.
 COLORREF parse_hex_color(const std::string& hex) {
     if (hex.size() != 7 || hex[0] != '#') return RGB(0, 0, 0);
     try {
@@ -20,7 +20,7 @@ COLORREF parse_hex_color(const std::string& hex) {
     }
 }
 
-/// @brief UTF-8 文字列を UTF-16 (wide) 文字列に変換する
+/// @brief Converts a UTF-8 string to a UTF-16 (wide) string
 std::wstring to_wide(const std::string& s) {
     if (s.empty()) return {};
     int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
@@ -31,8 +31,8 @@ std::wstring to_wide(const std::string& s) {
     return w;
 }
 
-/// @brief トップダウン 32bpp DIB セクションと、それを選択した描画用 DC を
-///        まとめて管理する RAII ラッパー。
+/// @brief RAII wrapper owning a top-down 32bpp DIB section and the drawing DC
+///        it is selected into.
 class DibCanvas {
 public:
     DibCanvas(uint32_t width, uint32_t height) {
@@ -42,7 +42,7 @@ public:
         BITMAPINFO bmi{};
         bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
         bmi.bmiHeader.biWidth       = static_cast<LONG>(width);
-        bmi.bmiHeader.biHeight      = -static_cast<LONG>(height); // 負値でトップダウン DIB
+        bmi.bmiHeader.biHeight      = -static_cast<LONG>(height); // negative = top-down DIB
         bmi.bmiHeader.biPlanes      = 1;
         bmi.bmiHeader.biBitCount    = 32;
         bmi.bmiHeader.biCompression = BI_RGB;
@@ -53,7 +53,7 @@ public:
             if (prev != nullptr && prev != HGDI_ERROR) {
                 old_bitmap_ = static_cast<HBITMAP>(prev);
             } else {
-                // SelectObject 失敗時は DIB を破棄し、valid() が false を返すようにする
+                // On SelectObject failure, discard the DIB so valid() returns false
                 DeleteObject(bitmap_);
                 bitmap_ = nullptr;
                 bits_   = nullptr;
@@ -81,7 +81,7 @@ private:
     void*   bits_       = nullptr;
 };
 
-/// @brief フォントハンドルを確実に解放する RAII ラッパー
+/// @brief RAII wrapper that reliably releases a font handle
 class GdiFont {
 public:
     GdiFont(int pixel_height, bool bold) {
@@ -103,14 +103,14 @@ private:
     HFONT font_ = nullptr;
 };
 
-/// @brief 指定領域に中央寄せでテキストを描画する
+/// @brief Draws text centered in the given area
 void draw_centered_text(HDC dc, const RECT& rect, const std::wstring& text,
                          COLORREF color, int font_height, bool bold) {
     if (text.empty()) return;
     GdiFont font(font_height, bold);
 
-    // CreateFontW/SelectObject の失敗時は元のフォントのまま描画する
-    // (フォールバック)。HGDI_ERROR を old_font に保持しないようにする。
+    // If CreateFontW/SelectObject fails, draw with the original font (fallback).
+    // Avoid keeping HGDI_ERROR in old_font.
     HFONT old_font = nullptr;
     if (font.handle()) {
         HGDIOBJ prev = SelectObject(dc, font.handle());
@@ -135,12 +135,12 @@ FrameBuffer render_placeholder_frame(const AppConfig::Placeholder& cfg,
     out.height = height;
     out.format = PixelFormat::RGBA;
 
-    // 0x0 はクラッシュさせず空バッファを返す
+    // 0x0 returns an empty buffer instead of crashing
     if (width == 0 || height == 0) return out;
 
-    // 実用最大解像度 (8192x8192) を超える場合は空バッファを返す。
-    // プレースホルダは静止画 1 枚をループ送出するため、巨大な解像度は
-    // 意図的な設定ミスや異常値とみなし bad_alloc を防ぐ。
+    // Return an empty buffer above the practical maximum resolution (8192x8192).
+    // The placeholder loops one still image, so a huge size is treated as a
+    // misconfiguration or bogus value; this also prevents bad_alloc.
     constexpr uint32_t kMaxDim    = 8192u;
     constexpr uint64_t kMaxPixels = static_cast<uint64_t>(kMaxDim) * kMaxDim;
     if (width > kMaxDim || height > kMaxDim ||
@@ -150,8 +150,8 @@ FrameBuffer render_placeholder_frame(const AppConfig::Placeholder& cfg,
         return out;
     }
 
-    // width*height*4 が size_t の範囲を超える場合も空バッファを返す
-    // (size_t が 32bit 環境などでの安全策)
+    // Also return an empty buffer if width*height*4 overflows size_t
+    // (safety for environments where size_t is 32-bit)
     if (static_cast<uint64_t>(width) * static_cast<uint64_t>(height) >
         std::numeric_limits<size_t>::max() / 4) {
         out.width  = 0;
@@ -168,18 +168,18 @@ FrameBuffer render_placeholder_frame(const AppConfig::Placeholder& cfg,
     COLORREF bg = parse_hex_color(cfg.background_hex);
     COLORREF fg = parse_hex_color(cfg.text_hex);
 
-    // 背景を塗りつぶす
+    // Fill the background
     RECT full{0, 0, static_cast<LONG>(width), static_cast<LONG>(height)};
     HBRUSH brush = CreateSolidBrush(bg);
     FillRect(dc, &full, brush);
     DeleteObject(brush);
 
-    // 解像度に応じてフォントサイズを決定する
+    // Choose the font size from the resolution
     int message_font_height = std::max(16, static_cast<int>(height) / 12);
     int sub_font_height     = std::max(12, static_cast<int>(height) / 24);
 
     if (cfg.show_sender_name && !sender_name.empty()) {
-        // 上半分にメッセージ、下半分に待機中の sender 名を表示する
+        // Message in the upper half, awaited sender name in the lower half
         LONG mid = full.bottom / 2;
         RECT message_rect{full.left, full.top, full.right, mid};
         RECT sub_rect{full.left, mid, full.right, full.bottom};
@@ -192,10 +192,10 @@ FrameBuffer render_placeholder_frame(const AppConfig::Placeholder& cfg,
 
     GdiFlush();
 
-    // DIB はリトルエンディアンの 0xAARRGGBB、つまりメモリ上は BGRA バイト順で
-    // 格納されている。エンコーダーは AV_PIX_FMT_RGBA 固定で入力を扱うため、
-    // R/B を入れ替えて RGBA バイト順に変換する。アルファは GDI が描画しないため
-    // 不透明 (255) を明示的に設定する。
+    // The DIB stores 0xAARRGGBB little-endian, i.e. BGRA byte order in memory.
+    // The encoder always takes AV_PIX_FMT_RGBA input, so swap R/B to get
+    // RGBA byte order. GDI does not draw alpha, so set it explicitly to
+    // opaque (255).
     const uint8_t* src = canvas.bits();
     for (size_t i = 0, n = static_cast<size_t>(width) * height; i < n; ++i) {
         const uint8_t* p = src + i * 4;

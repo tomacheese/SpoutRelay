@@ -6,9 +6,9 @@
 #include "spout/spout_monitor.hpp"
 #include "test_utils.hpp"
 
-/// @brief テスト用のモック ISpoutMonitor。
-///        receive_latest_frame() が呼ばれるたびに連番付きの新規フレームを返す。
-///        実際の Spout/GPU には依存しないため CI でも実行可能。
+/// @brief Mock ISpoutMonitor for tests.
+///        receive_latest_frame() returns a new sequentially numbered frame on every call.
+///        Independent of real Spout/GPU, so it also runs in CI.
 class MockSpoutMonitor : public ISpoutMonitor {
 public:
     bool init(std::string& /*error*/) override { return true; }
@@ -43,7 +43,7 @@ int run_frame_pump_tests() {
     printf("=== Frame Pump Tests ===\n");
 
     {
-        // start(nullptr, ...) は no-op であること
+        // start(nullptr, ...) is a no-op
         FramePump pump;
         pump.start(nullptr, 10);
         VERIFY_MSG(!pump.is_running(), "start(nullptr) should be a no-op");
@@ -51,7 +51,7 @@ int run_frame_pump_tests() {
     }
 
     {
-        // 未開始のキューに対する try_pop は false を返すこと
+        // try_pop on a pump that was never started returns false
         FramePump pump;
         FrameBuffer buf;
         FrameMeta meta;
@@ -61,10 +61,10 @@ int run_frame_pump_tests() {
     }
 
     {
-        // 未開始 (running_=false) の場合、wait_pop はキューが空でも
-        // 待機せず即座に false を返すこと
-        // (内部の wait 条件 `!queue_.empty() || !running_.load()` が
-        //  running_=false により直ちに真となるため)
+        // When not started (running_=false), wait_pop returns false immediately
+        // even if the queue is empty
+        // (the internal wait condition `!queue_.empty() || !running_.load()`
+        //   is already true because running_=false)
         FramePump pump;
         FrameBuffer buf;
         FrameMeta meta;
@@ -74,7 +74,7 @@ int run_frame_pump_tests() {
     }
 
     {
-        // ポンプ稼働中は wait_pop がフレームを受信できること
+        // wait_pop receives frames while the pump is running
         auto mock = std::make_shared<MockSpoutMonitor>();
         FramePump pump;
         pump.start(mock, 10);
@@ -90,7 +90,7 @@ int run_frame_pump_tests() {
     }
 
     {
-        // 稼働中は last_frame_time_ms / last_source_alive_ms が更新されること
+        // last_frame_time_ms / last_source_alive_ms are updated while running
         auto mock = std::make_shared<MockSpoutMonitor>();
         FramePump pump;
         VERIFY(pump.last_frame_time_ms() == 0);
@@ -107,13 +107,13 @@ int run_frame_pump_tests() {
     }
 
     {
-        // FramePump::MAX_QUEUE_SIZE (=4) を超えるフレームが生成された場合、
-        // 古いフレームが破棄され、キューが一定サイズに収まること
+        // When more than FramePump::MAX_QUEUE_SIZE frames are produced,
+        // old frames are dropped and the queue stays bounded
         auto mock = std::make_shared<MockSpoutMonitor>();
         FramePump pump;
-        pump.start(mock, 1); // poll_interval_ms=1 でキャプチャスレッドを高速に回す
+        pump.start(mock, 1); // poll_interval_ms=1 to spin the capture thread fast
 
-        // キューに十分なバックログが積まれるまで待つ
+        // wait until enough backlog has built up in the queue
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         int popped = 0;
@@ -141,7 +141,7 @@ int run_frame_pump_tests() {
     }
 
     {
-        // stop() はキューを排出し、再度 try_pop しても何も返らないこと
+        // stop() drains the queue; try_pop returns nothing afterwards
         auto mock = std::make_shared<MockSpoutMonitor>();
         FramePump pump;
         pump.start(mock, 0);

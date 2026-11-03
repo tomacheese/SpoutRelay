@@ -10,7 +10,7 @@ int run_supervisor_logic_tests() {
     // --- can_seamless_handoff ----------------------------------------------
 
     {
-        // 全条件を満たす場合のみシームレス切替可能
+        // Seamless switch is possible only when all conditions are met
         bool ok = can_seamless_handoff(
             /*seamless_handoff_requested=*/true,
             /*encoder_alive=*/true,
@@ -22,7 +22,7 @@ int run_supervisor_logic_tests() {
     }
 
     {
-        // シームレス移行が要求されていない場合は不可
+        // Not possible when seamless transition was not requested
         bool ok = can_seamless_handoff(
             false, true, true, 1280, 720, 1280, 720);
         VERIFY_MSG(!ok, "seamless_handoff_requested=false → not seamless");
@@ -30,7 +30,7 @@ int run_supervisor_logic_tests() {
     }
 
     {
-        // エンコーダーが生存していない場合は不可
+        // Not possible when the encoder is not alive
         bool ok = can_seamless_handoff(
             true, false, true, 1280, 720, 1280, 720);
         VERIFY_MSG(!ok, "encoder_alive=false → not seamless");
@@ -38,7 +38,7 @@ int run_supervisor_logic_tests() {
     }
 
     {
-        // RTSP クライアントが未接続の場合は不可
+        // Not possible when the RTSP client is not connected
         bool ok = can_seamless_handoff(
             true, true, false, 1280, 720, 1280, 720);
         VERIFY_MSG(!ok, "rtsp_connected=false → not seamless");
@@ -46,7 +46,7 @@ int run_supervisor_logic_tests() {
     }
 
     {
-        // 幅が一致しない場合は不可
+        // Not possible when the width differs
         bool ok = can_seamless_handoff(
             true, true, true, 640, 720, 1280, 720);
         VERIFY_MSG(!ok, "width mismatch → not seamless");
@@ -54,7 +54,7 @@ int run_supervisor_logic_tests() {
     }
 
     {
-        // 高さが一致しない場合は不可
+        // Not possible when the height differs
         bool ok = can_seamless_handoff(
             true, true, true, 1280, 360, 1280, 720);
         VERIFY_MSG(!ok, "height mismatch → not seamless");
@@ -62,10 +62,10 @@ int run_supervisor_logic_tests() {
     }
 
     {
-        // 解像度 0x0 同士でも、他条件を満たせばシームレス成立
-        // (PLACEHOLDER の初期状態 current_width_=0, current_height_=0 から
-        //  同じ 0x0 を指定するケースは実際には発生しないが、関数自体は
-        //  純粋な等値判定であることを確認する)
+        // Seamless is possible even for 0x0 on both sides if the other conditions hold
+        // (a 0x0 request from PLACEHOLDER's initial state current_width_=0, current_height_=0
+        //   never happens in practice, but this confirms the function is
+        //   a pure equality check)
         bool ok = can_seamless_handoff(
             true, true, true, 0, 0, 0, 0);
         VERIFY_MSG(ok, "0x0 == 0x0 with other conditions true → seamless");
@@ -101,7 +101,7 @@ int run_supervisor_logic_tests() {
     // --- should_reset_connect_timer_once -------------------------------------
 
     {
-        // 初回 (source_responded=false) は true を返しフラグを true にセットする
+        // First call (source_responded=false) returns true and sets the flag
         bool source_responded = false;
         bool result = should_reset_connect_timer_once(source_responded);
         VERIFY_MSG(result, "first call should return true");
@@ -110,7 +110,7 @@ int run_supervisor_logic_tests() {
     }
 
     {
-        // 2 回目以降 (source_responded=true) は false を返す (無限ループ防止)
+        // Second and later calls (source_responded=true) return false (prevents an infinite loop)
         bool source_responded = true;
         bool result = should_reset_connect_timer_once(source_responded);
         VERIFY_MSG(!result, "subsequent call should return false");
@@ -119,7 +119,7 @@ int run_supervisor_logic_tests() {
     }
 
     {
-        // 同一フラグで連続呼び出し: 1 回目のみ true、2 回目以降は false
+        // Repeated calls with the same flag: only the first returns true, the rest false
         bool source_responded = false;
         bool first  = should_reset_connect_timer_once(source_responded);
         bool second = should_reset_connect_timer_once(source_responded);

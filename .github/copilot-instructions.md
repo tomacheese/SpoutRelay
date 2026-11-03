@@ -5,7 +5,7 @@ encodes them to H.264 via FFmpeg (NVENC, falling back to `h264_mf`), and publish
 to an RTSP server. Build system is CMake + Ninja under MinGW-w64. There is no
 external unit-test framework — a custom runner (`publisher_tests`) is used.
 
-Write review comments in **Japanese** (this repository's commits, PRs, and docs are in Japanese).
+Write review comments in **English**. Project overview, build/test commands and conventions are in [AGENTS.md](../AGENTS.md).
 
 ## Review priorities
 
@@ -33,13 +33,7 @@ Write review comments in **Japanese** (this repository's commits, PRs, and docs 
 
 ## Testing expectations
 
-- New pure-logic function → extract a small header under `src/` and add a unit
-  test in `tests/unit/` (pattern: `src/app/supervisor_logic.hpp` +
-  `tests/unit/test_supervisor_logic.cpp`).
-- New config key → add validation + a case in `tests/unit/test_config_loader.cpp`
-  + document it in `docs/configuration.md`.
-- New abnormal-path E2E scenario → add to `e2e-test/monkey-tests.ps1`.
-- Flag logic/branch/config additions that ship without matching tests.
+- Flag logic/branch/config additions that ship without matching tests (see the conventions in [AGENTS.md](../AGENTS.md)).
 
 ## Known non-issues (do NOT flag)
 
@@ -53,6 +47,5 @@ Write review comments in **Japanese** (this repository's commits, PRs, and docs 
   suggest adopting a test framework.
 - **`FetchContent` pinned to fixed tags** (spdlog, nlohmann/json) is intentional;
   do not suggest floating versions.
-- **Japanese commit messages, docs, and PR text** are the repository convention.
 - **`config.json`, `state/`, `logs/`, `deps/ffmpeg/` gitignored** — expected;
   `config.example.json` is the committed template.

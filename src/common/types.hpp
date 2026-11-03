@@ -50,12 +50,12 @@ struct FrameBuffer {
     uint32_t height = 0;
     PixelFormat format = PixelFormat::BGRA;
 
-    /// @brief GPU ゼロコピーパス専用。SpoutDX の内部テクスチャへの借用ポインタ
-    ///        (実体は ID3D11Texture2D*)。
-    ///        非 null の場合、EncoderController は CPU メモリコピーをスキップし
-    ///        CopySubresourceRegion で直接 HW フレームプールへ転送する。
-    ///        ポインタの所有権は SpoutMonitor 側が持つ。
-    ///        GPU パスが無効の場合は nullptr のまま。
+    /// @brief GPU zero-copy path only. Borrowed pointer to SpoutDX's internal texture
+    ///        (actually an ID3D11Texture2D*).
+    ///        When non-null, EncoderController skips the CPU memory copy and transfers
+    ///        directly into the HW frame pool via CopySubresourceRegion.
+    ///        Ownership stays with SpoutMonitor.
+    ///        Remains nullptr when the GPU path is disabled.
     void* gpu_texture = nullptr;
 };
 

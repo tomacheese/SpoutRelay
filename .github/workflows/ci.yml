@@ -18,8 +18,8 @@ on:
   merge_group:
   workflow_dispatch:
 
-# pull_request と pull_request_target が同一グループになると互いをキャンセルしてしまうため
-# event_name を含めることで両イベントのキャンセルを独立させる
+# Because pull_request and pull_request_target would share one group and cancel each other,
+# include event_name so cancellation is independent per event
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -44,7 +44,7 @@ jobs:
         id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # マージ済みの場合は base ブランチ (master)、未マージの場合は PR ヘッド SHA を使う
+          # Merged: use the base branch (master); not merged: use the PR head SHA
           ref: ${{ github.event.pull_request.merged == true && github.base_ref || github.event.pull_request.head.sha }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -56,9 +56,9 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           default_bump: "minor"
           custom_release_rules: "feat:minor:✨ Features,fix:patch:🐛 Fixes,docs:patch:📰 Docs,chore:patch:🎨 Chore,pref:patch:🎈 Performance improvements,refactor:patch:🧹 Refactoring,build:patch:🔍 Build,ci:patch:🔍 CI,revert:patch:⏪ Revert,style:patch:🧹 Style,test:patch:👀 Test,release:major:📦 Release"
-          # マージ済みの場合のみ実際にタグを作成する（PR 中はドライラン）
+          # Create the tag only when merged (dry run while the PR is open)
           dry_run: ${{ github.event.pull_request.merged == true && 'false' || 'true' }}
-          # pull_request_target の GITHUB_SHA は merge 後の HEAD を指さない場合があるため明示的に指定
+          # GITHUB_SHA of pull_request_target may not point at the post-merge HEAD, so specify it explicitly
           commit_sha: ${{ steps.checkout.outputs.commit }}
 
   cpp-build:
@@ -66,8 +66,8 @@ jobs:
     runs-on: windows-latest
     needs:
       - calc-version
-    # calc-version はスキップされることがある（push/pull_request/workflow_dispatch イベント）ため
-    # skipped も成功扱いにする。また closed で未マージの PR はビルドをスキップする
+    # calc-version can be skipped (push/pull_request/workflow_dispatch events), so
+    # treat skipped as success. Also skip the build for closed, unmerged PRs
     if: >-
       always() &&
       (needs.calc-version.result == 'success' || needs.calc-version.result == 'skipped') &&
@@ -81,8 +81,8 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.GITHUB_TOKEN }}
-          # pull_request_target: マージ済みなら base ブランチ、未マージなら PR ヘッド SHA
-          # それ以外 (push/pull_request/workflow_dispatch): github.sha
+          # pull_request_target: base branch if merged, PR head SHA if not
+          # otherwise (push/pull_request/workflow_dispatch): github.sha
           ref: "${{ github.event.pull_request.merged == true && github.base_ref || github.event.pull_request.head.sha || github.sha }}"
 
       - name: 🏗 Setup MSYS2 / MinGW64
@@ -169,7 +169,7 @@ jobs:
         run: |
           $VERSION = "${{ needs.calc-version.outputs.tag }}"
           $ARCHIVE = "spout-relay-${VERSION}-win64.zip"
-          # dist/ は前のステップで strip 済み EXE と DLL が入っている
+          # dist/ holds the stripped EXE and DLLs from the previous step
           if (Test-Path config\config.example.json) { Copy-Item config\config.example.json dist\ }
           if (Test-Path README.md) { Copy-Item README.md dist\ }
           Compress-Archive -Path dist\* -DestinationPath $ARCHIVE -Force

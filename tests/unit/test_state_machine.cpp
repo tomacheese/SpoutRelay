@@ -121,7 +121,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // CONNECTING_OUTPUT → FATAL (エンコーダー初期化が全コーデックで失敗した場合)
+        // CONNECTING_OUTPUT -> FATAL (encoder init failed for every codec)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -134,7 +134,7 @@ int run_state_machine_tests() {
 
     {
         // PROBING → PLACEHOLDER → CONNECTING_OUTPUT
-        // (ソースが見つからない間 NO SIGNAL 映像を配信し、ソース出現で復帰する)
+        // (streams a NO SIGNAL picture while no source is found, recovers when one appears)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -146,7 +146,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // PLACEHOLDER → STOPPING (シャットダウン要求時)
+        // PLACEHOLDER -> STOPPING (shutdown requested)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -157,7 +157,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // RECONFIGURING → FATAL (解像度変更後のエンコーダー再初期化が失敗した場合)
+        // RECONFIGURING -> FATAL (encoder re-init after a resolution change failed)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -171,11 +171,11 @@ int run_state_machine_tests() {
     }
 
     // -----------------------------------------------------------------
-    // 以下、issue #20 の調査で判明した未カバー遷移を網羅する
+    // Previously uncovered transitions
     // -----------------------------------------------------------------
 
     {
-        // INIT → FATAL (起動直後の致命的エラー)
+        // INIT -> FATAL (fatal error right after startup)
         StateMachine sm;
         bool ok = sm.transition_to(PublisherState::FATAL);
         VERIFY_MSG(ok, "INIT → FATAL should succeed");
@@ -184,7 +184,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // IDLE → STOPPING (起動直後のシャットダウン要求)
+        // IDLE -> STOPPING (shutdown requested right after startup)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         bool ok = sm.transition_to(PublisherState::STOPPING);
@@ -193,7 +193,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // PROBING → IDLE (探索を中断して待機状態へ戻る)
+        // PROBING -> IDLE (probing aborted, back to waiting)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -203,7 +203,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // PROBING → STOPPING (探索中のシャットダウン要求)
+        // PROBING -> STOPPING (shutdown requested while probing)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -213,7 +213,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // CONNECTING_OUTPUT → PROBING (出力接続中にソースが消失)
+        // CONNECTING_OUTPUT -> PROBING (source disappeared while connecting output)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -224,7 +224,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // CONNECTING_OUTPUT → STOPPING (出力接続中のシャットダウン要求)
+        // CONNECTING_OUTPUT -> STOPPING (shutdown requested while connecting output)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -235,7 +235,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // STREAMING → STOPPING (配信中のシャットダウン要求)
+        // STREAMING -> STOPPING (shutdown requested while streaming)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -247,7 +247,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // STREAMING → IDLE (配信を停止し待機状態へ戻る)
+        // STREAMING -> IDLE (streaming stopped, back to waiting)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -259,7 +259,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // STREAMING → PROBING (配信中にソースが消失し再探索へ)
+        // STREAMING -> PROBING (source disappeared while streaming, re-probe)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -271,7 +271,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // STALLED → STREAMING (送出停滞からの復帰)
+        // STALLED -> STREAMING (recovery from stalled output)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -284,7 +284,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // STALLED → RECONNECTING_OUTPUT (停滞中に RTSP 出力エラー発生)
+        // STALLED -> RECONNECTING_OUTPUT (RTSP output error while stalled)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -297,7 +297,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // STALLED → STOPPING (停滞中のシャットダウン要求)
+        // STALLED -> STOPPING (shutdown requested while stalled)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -310,7 +310,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // STALLED → IDLE (停滞を解消し待機状態へ戻る)
+        // STALLED -> IDLE (stall resolved, back to waiting)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -323,7 +323,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // STALLED → PROBING (停滞中にソースが完全に消失し再探索へ)
+        // STALLED -> PROBING (source fully disappeared while stalled, re-probe)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -336,7 +336,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // STALLED → PLACEHOLDER (送出元消失 → NO SIGNAL シームレス切替)
+        // STALLED -> PLACEHOLDER (source lost -> seamless switch to NO SIGNAL)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -349,7 +349,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // RECONFIGURING → STREAMING (解像度変更後のエンコーダー再初期化に成功)
+        // RECONFIGURING -> STREAMING (encoder re-init after a resolution change succeeded)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -362,7 +362,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // RECONFIGURING → STOPPING (再構成中のシャットダウン要求)
+        // RECONFIGURING -> STOPPING (shutdown requested while reconfiguring)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -375,7 +375,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // RECONNECTING_OUTPUT → STREAMING (RTSP 再接続に成功)
+        // RECONNECTING_OUTPUT -> STREAMING (RTSP reconnect succeeded)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -388,7 +388,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // RECONNECTING_OUTPUT → STOPPING (RTSP 再接続待ち中のシャットダウン要求)
+        // RECONNECTING_OUTPUT -> STOPPING (shutdown requested while waiting for RTSP reconnect)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -401,7 +401,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // STOPPING → IDLE (シャットダウン処理完了後、待機状態へ復帰)
+        // STOPPING -> IDLE (back to waiting after shutdown completes)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::STOPPING);
@@ -411,11 +411,11 @@ int run_state_machine_tests() {
     }
 
     // -----------------------------------------------------------------
-    // issue #26: RECOVERING_DEVICE 遷移テスト
+    // RECOVERING_DEVICE transition tests
     // -----------------------------------------------------------------
 
     {
-        // STREAMING → RECOVERING_DEVICE (GPU TDR 発生時)
+        // STREAMING -> RECOVERING_DEVICE (GPU TDR occurred)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -428,7 +428,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // STALLED → RECOVERING_DEVICE (STALLED 中に GPU TDR 発生)
+        // STALLED -> RECOVERING_DEVICE (GPU TDR occurred while STALLED)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -442,7 +442,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // RECOVERING_DEVICE → PROBING (デバイス再作成成功 → 再探索・再接続)
+        // RECOVERING_DEVICE -> PROBING (device re-created, re-probe and reconnect)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -455,7 +455,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // RECOVERING_DEVICE → FATAL (デバイス再作成失敗)
+        // RECOVERING_DEVICE -> FATAL (device re-creation failed)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -469,7 +469,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // RECOVERING_DEVICE → STOPPING (回復中にシャットダウン要求)
+        // RECOVERING_DEVICE -> STOPPING (shutdown requested during recovery)
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         sm.transition_to(PublisherState::PROBING);
@@ -482,7 +482,7 @@ int run_state_machine_tests() {
     }
 
     {
-        // 不正遷移: IDLE → RECOVERING_DEVICE は拒否される
+        // Invalid transition: IDLE -> RECOVERING_DEVICE is rejected
         StateMachine sm;
         sm.transition_to(PublisherState::IDLE);
         bool ok = sm.transition_to(PublisherState::RECOVERING_DEVICE);

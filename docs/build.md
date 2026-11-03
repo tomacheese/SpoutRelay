@@ -1,144 +1,154 @@
-# ビルド手順
+# Build Guide
 
-## 前提条件
+## Prerequisites
 
-### コンパイラ
+### Compiler
 
-GCC 15.2.0 (MinGW-w64) を推奨します。[Scoop](https://scoop.sh/) でインストールできます。
+GCC 15.2.0 (MinGW-w64) is recommended. It can be installed with [Scoop](https://scoop.sh/):
 
 ```powershell
 scoop install gcc
 ```
 
-### ビルドツール
+Alternatively, use the MSYS2 MinGW64 toolchain, as CI does.
+
+### Build tools
 
 ```powershell
 scoop install cmake ninja
 ```
 
-### 依存ライブラリの準備
+### Preparing dependencies
 
-`deps/` ディレクトリに以下が必要です。
+The following are required.
 
-#### FFmpeg 開発ライブラリ
+#### FFmpeg development libraries
 
-[BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases) から `ffmpeg-master-latest-win64-lgpl-shared.zip` をダウンロードし、展開して `deps/ffmpeg/` に配置します。
+Either option works:
+
+- **Local tree**: download `ffmpeg-master-latest-win64-lgpl-shared.zip` from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases), extract it and place the contents in `deps/ffmpeg/` (or pass `-DFFMPEG_ROOT=<path>` to CMake).
+- **pkg-config / MSYS2**: if `pkg-config` finds `libavcodec`, `libavformat`, `libavutil`, `libswscale` and `libswresample`, they are used instead (for example `pacman -S mingw-w64-x86_64-ffmpeg`).
 
 ```text
 deps/ffmpeg/
-├── bin/          # avcodec-62.dll 等の DLL
-├── include/      # libavcodec/ 等のヘッダー
-└── lib/          # libavcodec.dll.a 等のインポートライブラリ
+├── bin/          # DLLs such as avcodec-62.dll
+├── include/      # headers such as libavcodec/
+└── lib/          # import libraries such as libavcodec.dll.a
 ```
 
 #### Spout2 SDK
 
-[Spout2 GitHub](https://github.com/leadedge/Spout2) をクローンまたはダウンロードし `deps/Spout2/` に配置します。
+Spout2 is a git submodule at `deps/Spout2/`. Fetch it with:
+
+```powershell
+git submodule update --init
+```
 
 ```text
 deps/Spout2/
 └── SPOUTSDK/
-    ├── SpoutGL/          # SpoutCopy, SpoutDirectX, SpoutFrameCount 等
+    ├── SpoutGL/          # SpoutCopy, SpoutDirectX, SpoutFrameCount, etc.
     └── SpoutDirectX/
         └── SpoutDX/      # SpoutDX.h / SpoutDX.cpp
 ```
 
-#### nlohmann/json / spdlog（自動取得）
+#### nlohmann/json and spdlog (automatic)
 
-CMake の `FetchContent` により configure 時に自動でダウンロードされます。手動配置は不要です。
+Both are downloaded automatically by CMake `FetchContent` at configure time. No manual setup is needed.
 
-## 手順
+## Steps
 
-### 1. CMake 設定
+### 1. Configure CMake
 
 ```powershell
 cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=toolchain-mingw.cmake
 ```
 
-`toolchain-mingw.cmake` は MSYS2/MinGW64 の標準インストールパスをデフォルトとしています。別の場所にインストールした場合は `MINGW_BIN` / `MINGW_ROOT` 環境変数で上書きできます。
+`toolchain-mingw.cmake` defaults to the standard MSYS2/MinGW64 install path (`/mingw64/bin`). If MinGW is installed elsewhere, override it with `-DMINGW_BIN=...` / `-DMINGW_ROOT=...` or the `MINGW_BIN` / `MINGW_ROOT` environment variables.
 
-### 2. ビルド（全ターゲット）
+### 2. Build (all targets)
 
 ```powershell
 cmake --build build
 ```
 
-#### 個別ターゲット
+#### Individual targets
 
 ```powershell
-# メインアプリのみ
+# Main app only
 cmake --build build --target spout-relay
 
-# テストのみ
+# Unit tests only
 cmake --build build --target publisher_tests
 
-# テスト用 Spout センダーのみ
+# Test Spout senders only
 cmake --build build --target spout_test_sender
+cmake --build build --target spout_static_sender
+cmake --build build --target spout_res_changer
 ```
 
-### 3. FFmpeg DLL のコピー
+### 3. Copy the FFmpeg DLLs
 
-ビルド完了後、`deps/ffmpeg/bin/` にある DLL を実行ファイルと同じ場所へコピーします。
+After the build, copy the DLLs from `deps/ffmpeg/bin/` next to the executable. The build succeeds without them, but `spout-relay.exe` fails to start.
 
 ```powershell
 Copy-Item deps\ffmpeg\bin\*.dll build\
 ```
 
-必要な DLL:
+Required DLLs:
 
-| DLL | 用途 |
-|-----|------|
-| `avcodec-62.dll` | H.264 エンコード |
-| `avformat-62.dll` | RTSP マルチプレクサ |
-| `avutil-60.dll` | FFmpeg ユーティリティ |
-| `swscale-9.dll` | RGBA→YUV 変換 |
-| `swresample-6.dll` | avformat の依存 |
+| DLL | Purpose |
+|-----|---------|
+| `avcodec-62.dll` | H.264 encoding |
+| `avformat-62.dll` | RTSP muxer |
+| `avutil-60.dll` | FFmpeg utilities |
+| `swscale-9.dll` | RGBA→YUV conversion |
+| `swresample-6.dll` | Dependency of avformat |
 
-## ビルド出力
+The version suffixes match the FFmpeg release the project is built against; adjust them if you use a different FFmpeg major version.
+
+## Build output
 
 ```text
 build/
-├── spout-relay.exe           # メインアプリ
-├── spout_test_sender.exe     # E2E テスト用 Spout センダー
+├── spout-relay.exe           # Main app
+├── spout_test_sender.exe     # Spout sender for E2E tests
+├── spout_static_sender.exe   # Freeze-frame sender for E2E tests
+├── spout_res_changer.exe     # Resolution-changing sender for E2E tests
 └── tests/
-    └── publisher_tests.exe   # ユニットテスト
+    └── publisher_tests.exe   # Unit tests
 ```
 
-## テスト実行
+## Running the tests
 
 ```powershell
 .\build\tests\publisher_tests.exe
 ```
 
-期待される出力:
+Expected output ends with:
 
 ```text
 All tests passed.
 ```
 
-（104 行の `[PASS]` が出力される）
+Each passing assertion block prints a `[PASS]` line. For test categories and details, see [testing.md](testing.md).
 
-テストの分類・実行方法の詳細は [docs/testing.md](testing.md) を参照してください。
+## Customizing the toolchain
 
-## ツールチェーンのカスタマイズ
+Edit `toolchain-mingw.cmake` to change the compiler paths, or override `MINGW_BIN` as described above.
 
-`toolchain-mingw.cmake` を編集してコンパイラパスを変更できます:
+## CMake targets
 
-```cmake
-set(CMAKE_C_COMPILER   "C:/path/to/gcc.exe")
-set(CMAKE_CXX_COMPILER "C:/path/to/g++.exe")
-```
+| Target | Type | Description |
+|--------|------|-------------|
+| `spout2_static` | Static library | Spout2 SDK (compiled without `WIN32_LEAN_AND_MEAN`) |
+| `publisher_lib` | Static library | All application logic |
+| `spout-relay` | Executable | Main app |
+| `publisher_tests` | Executable | Unit tests with a custom test runner (built when `BUILD_TESTS=ON`, the default) |
+| `spout_test_sender` | Executable | Sender for E2E tests |
+| `spout_static_sender` | Executable | Freeze-frame sender for E2E tests |
+| `spout_res_changer` | Executable | Resolution-changing sender for E2E tests |
 
-## CMake ターゲット構成
+### Why `spout2_static` is separate
 
-| ターゲット | 種類 | 説明 |
-|----------|------|------|
-| `spout2_static` | 静的ライブラリ | Spout2 SDK（WIN32_LEAN_AND_MEAN なし） |
-| `publisher_lib` | 静的ライブラリ | アプリロジック全体 |
-| `spout-relay` | 実行ファイル | メインアプリ |
-| `publisher_tests` | 実行ファイル | カスタムテストランナーによるユニットテスト |
-| `spout_test_sender` | 実行ファイル | E2E テスト用センダー |
-
-### spout2_static の分離について
-
-`SpoutFrameCount.cpp` はマルチメディアタイマー API（`TIMECAPS`、`timeBeginPeriod`）を使用しており、`WIN32_LEAN_AND_MEAN` が定義されていると `mmsystem.h` がインクルードされず、コンパイルエラーになります。このため Spout2 のソースは `WIN32_LEAN_AND_MEAN` を定義せずに別ターゲットとしてコンパイルしています。
+`SpoutFrameCount.cpp` uses the multimedia timer API (`TIMECAPS`, `timeBeginPeriod`). When `WIN32_LEAN_AND_MEAN` is defined, `mmsystem.h` is not included and compilation fails. The Spout2 sources are therefore compiled as a separate target without `WIN32_LEAN_AND_MEAN`.

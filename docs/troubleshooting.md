@@ -1,33 +1,33 @@
-# トラブルシューティング
+# Troubleshooting
 
-## 起動・設定エラー
+## Startup and configuration errors
 
 ### `[ERROR] Cannot open config file: config/config.json`
 
-設定ファイルが見つかりません。`--config` オプションで絶対パスを指定してください。
+The config file was not found. If `--config` is not given, `config/config.json` relative to the working directory is used. Specify an absolute path with `--config`:
 
 ```powershell
 .\spout-relay.exe --config C:\path\to\config\config.json
 ```
 
-### 設定のバリデーションエラー（例: `spout.sender_name must not be empty`）
+### Config validation errors (for example `spout.sender_name must not be empty`)
 
-設定値が不正です。以下を確認してください:
+A config value is invalid. The message names the offending key and the process exits with code 1. See the full list of checks in [configuration.md](configuration.md#validation). Common causes:
 
-- `spout.sender_name` が空でない
-- `rtsp.url` が空でない
-- `encoder.bitrate_kbps` > 0
-- `encoder.fps` > 0
+- `spout.sender_name` is empty
+- `rtsp.url` does not start with `rtsp://`
+- `encoder.bitrate_kbps` is not greater than 0
+- `encoder.fps` is outside 1 to 240
 
 ---
 
-## Spout 関連
+## Spout
 
-### `probe_no_sender` が続く / センダーが見つからない
+### `probe_no_sender` keeps appearing / the sender is not found
 
-**原因:** 指定した `sender_name` が Spout 共有メモリに登録されていない。
+**Cause:** the configured `sender_name` is not registered in Spout shared memory.
 
-**確認方法:**
+**How to check:**
 
 ```powershell
 $mmf = [System.IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting("SpoutSenderNames")
@@ -40,61 +40,45 @@ for ($i = 0; $i -lt 10; $i++) {
 }
 ```
 
-取得したセンダー名を `config.json` の `spout.sender_name` に正確に設定してください。
+Set the sender name you find exactly as `spout.sender_name` in `config.json`.
 
-### `SPOUT_RECEIVE_FAILED: Timeout waiting for first frame`（1回だけ発生）
+### `SPOUT_RECEIVE_FAILED: Timeout waiting for first frame` (once)
 
-**原因:** 初回接続時は `ReceiveImage()` が更新イベント（実データなし）を返すため、1 回リトライが発生します。これは正常動作です。2 回目の試行で通常は成功します。
+**Cause:** after connecting, the first frame did not arrive within `5 × spout.frame_timeout_ms`. The state returns to `PROBING` and tries again, which usually succeeds if the sender is running. If it keeps recurring, see the next item.
 
-### `SPOUT_RECEIVE_FAILED` が繰り返し発生する
+### `SPOUT_RECEIVE_FAILED` keeps recurring
 
-**原因・対処:**
+**Causes and fixes:**
 
-1. **GPU アダプター不一致** — センダーとレシーバーが異なる物理 GPU 上にある場合、`SetAdapterAuto(false)`（PR #36 以降のデフォルト）では自動復帰しない。PLACEHOLDER への自動フォールバックも行われず、接続の再試行を繰り返す。本プロジェクトの稼働環境は GPU 単体構成のため通常は該当しないが、マルチ GPU 環境で発生した場合はセンダー側のアプリが使用する GPU を変更する
-2. **センダーがフレームを送出していない** — VRChat 等の送信側アプリが実際に動作しているか確認
-3. **`frame_timeout_ms` が短すぎる** — GPU 負荷が高い場合は `300` → `500` 以上に増やす
+1. **GPU adapter mismatch**: if the sender and receiver are on different physical GPUs, the receiver (which uses `SetAdapterAuto(false)`) does not recover automatically. The placeholder is not used either, and connection attempts repeat. This is rare on single-GPU machines; on a multi-GPU machine, change the GPU used by the sending application.
+2. **The sender is not sending frames**: check that the sending application (VRChat, etc.) is actually running.
+3. **`frame_timeout_ms` is too short**: under high GPU load, raise it from `300` to `500` or more.
 
-### `STALLED` → `RECONNECTING_OUTPUT` の無限ループ (`healthy: false`, `frames_received: 0` のまま増加しない)
+### Endless `STALLED` ↔ `RECONNECTING_OUTPUT` loop (`healthy: false`, `frames_received` not increasing)
 
-**症状:** `health.json` が `state: STALLED` (または `RECONNECTING_OUTPUT` との往復) のまま固定され、
-`reconnect_attempts` だけが増加し続ける。`sender_fps: 0.0` で `rtsp_errors` は増えない
-(RTSP 自体は正常に再接続できているが、Spout 側からフレームが一切届かない)。
+**Symptoms:** `health.json` stays at `state: STALLED` (or alternates with `RECONNECTING_OUTPUT`) and only `reconnect_attempts` keeps growing. `sender_fps` is `0.0` and `rtsp_errors` does not grow (RTSP reconnects fine, but no frames arrive from Spout).
 
-**原因:** PLACEHOLDER → 実ソース復帰時などに GPU ゼロコピーパス (`ReceiveTexture()`) と
-CPU パス (`ReceiveImage()`) が同一セッション内で切り替わる際、spoutDX 内部の更新イベント
-フラグ (`m_bUpdated`) の消費タイミングが GPU/CPU パス間で非対称であるため、CPU パス側の
-一度限りの初期化 (`CheckStagingTextures()`) が実行されないまま `receive_latest_frame()` が
-恒久的に失敗し続けることがあります。RTSP レイヤーの再接続だけではこの状態を解消できません。
+**Cause:** when the GPU zero-copy path (`ReceiveTexture()`) and the CPU path (`ReceiveImage()`) are switched within one session (for example when returning from PLACEHOLDER to a real source), the spoutDX internal update-event flag (`m_bUpdated`) is consumed asymmetrically between the two paths. The one-time CPU path initialisation (`CheckStagingTextures()`) may then never run, and `receive_latest_frame()` keeps failing. Reconnecting RTSP alone does not clear this.
 
-**恒久対応 (適用済み):** `handle_connecting_output()` で、エンコーダーが GPU/CPU いずれの
-受信パスを使うか確定した直後に `SpoutMonitor` を明示的に `disconnect()`/`connect()` し、
-`m_bUpdated` を確実にリセットしてから初回フレーム受信を開始するようにしました。
+**Fix:** `handle_connecting_output()` explicitly calls `SpoutMonitor::disconnect()`/`connect()` right after the encoder decides which receive path to use, which resets `m_bUpdated` before the first frame is received.
 
-**保険的対応 (適用済み):** それでも同種の膠着状態が発生した場合に備え、
-`spout.stalled_recovery_max_attempts` (既定 `10`) 回 STALLED → RECONNECTING_OUTPUT を
-繰り返してもフレーム受信が回復しない場合、Spout 受信側を含めた完全な再接続
-(`PROBING` からのやり直し) を自動的に強制します。詳細は
-[`docs/state-machine.md` の「STALLED からの保険的ウォッチドッグ」](state-machine.md#stalled-からの保険的ウォッチドッグ-stalled_recovery_forced)
-を参照してください。ログに `stalled_recovery_forced` イベントが記録されていれば、
-この保険的ウォッチドッグが発動したことを示します。
+**Safeguard:** if the same kind of deadlock still occurs, a watchdog forces a full reconnect (restart from `PROBING`, including the Spout receiver) after `spout.stalled_recovery_max_attempts` (default `10`) consecutive `STALLED → RECONNECTING_OUTPUT` cycles without frame recovery. See [the STALLED watchdog section in state-machine.md](state-machine.md#watchdog-for-stalled-loops-stalled_recovery_forced). A `stalled_recovery_forced` event in the log means the watchdog fired.
 
 ---
 
-## GPU TDR（デバイスロスト）関連
+## GPU TDR (device loss)
 
-### GPU TDR が発生してもクラッシュせず自動復帰する仕組み
+### How the app recovers from a TDR without crashing
 
-GPU 高負荷時に Windows の Timeout Detection and Recovery（TDR）が発動すると、
-NVENC が使用している D3D11 デバイスが `DXGI_ERROR_DEVICE_REMOVED` 状態になります。
-SpoutRelay v0.7 以降はデバイスロストを自動検出し、以下のシーケンスで復帰します:
+When Windows Timeout Detection and Recovery (TDR) triggers under heavy GPU load, the D3D11 device used by NVENC enters the `DXGI_ERROR_DEVICE_REMOVED` state. SpoutRelay detects the device loss automatically and recovers as follows:
 
-1. `STREAMING` / `STALLED` 状態でデバイスロストを検出 → `RECOVERING_DEVICE` へ遷移
-2. エンコードスレッド・FramePump・RTSP・エンコーダーを順番に解体
-3. `SpoutDX::CloseDirectX11()` → `OpenDirectX11()` でデバイスを再作成
-4. 成功: `PROBING` → `CONNECTING_OUTPUT` → `STREAMING` と自動復帰
-5. 失敗: `FATAL` へ遷移（アプリ終了）
+1. Device loss is detected in `STREAMING` / `STALLED` → the state becomes `RECOVERING_DEVICE`
+2. The encode thread, FramePump, RTSP and encoder are torn down in order
+3. `SpoutDX::CloseDirectX11()` → `OpenDirectX11()` recreates the device
+4. Success: automatically back through `PROBING` → `CONNECTING_OUTPUT` → `STREAMING`
+5. Failure: the state becomes `FATAL` (the app exits)
 
-ログで確認する際は以下のイベントが順に記録されます:
+The log records events in this order:
 
 ```json
 {"event":"gpu_device_lost", ...}
@@ -105,97 +89,90 @@ SpoutRelay v0.7 以降はデバイスロストを自動検出し、以下のシ�
 {"event":"state_changed","from":"CONNECTING_OUTPUT","to":"STREAMING", ...}
 ```
 
-### GPU TDR が頻発する場合の対処
+### If TDR happens frequently
 
-TDR は GPU が長時間（デフォルト 2 秒）応答しない場合に Windows が強制リセットします。
+Windows resets the GPU when it does not respond for a long time (2 seconds by default).
 
-- **GPU 負荷を下げる** — `encoder.bitrate_kbps` を下げる、または `encoder.codec` を
-  `h264_mf`（CPU エンコード）に変更する
-- **TDR タイムアウトを延長する** — レジストリ `HKLM\System\CurrentControlSet\Control\GraphicsDrivers\TdrDelay`
-  を増やす（例: 8 → デフォルトは 2 秒）
-- **ドライバー更新** — 最新の NVIDIA ドライバーへ更新する
+- **Reduce GPU load**: lower `encoder.bitrate_kbps`, or change `encoder.codec` to `h264_mf` (CPU encoding)
+- **Extend the TDR timeout**: raise the registry value `HKLM\System\CurrentControlSet\Control\GraphicsDrivers\TdrDelay` (the default is 2 seconds)
+- **Update drivers**: install the latest NVIDIA driver
 
-### `SPOUT_REINIT_FAILED` が発生してアプリが FATAL になる
+### `SPOUT_REINIT_FAILED` and the app goes `FATAL`
 
-デバイス再作成（`OpenDirectX11()`）に失敗した場合に発生します。
+This happens when device recreation (`OpenDirectX11()`) fails.
 
-**原因・対処:**
+**Causes and fixes:**
 
-- GPU ドライバーが破損している → ドライバーを再インストール
-- GPU が物理的に取り外されている（リモートデスクトップ環境など）
-- アプリを再起動すると通常は回復する
+- The GPU driver is corrupted: reinstall the driver
+- The GPU is physically unavailable (for example in a remote desktop session)
+- Restarting the app usually recovers
 
 ---
 
-## エンコーダー関連
+## Encoder
 
 ### `ENCODER_INIT_FAILED`
 
-**原因:** 設定したコーデック（`codec` と `fallback_codec` の両方）が使用できない。
+**Cause:** neither the configured `codec` nor `fallback_codec` can be used.
 
-**確認方法:**
+**How to check:**
 
 ```powershell
-# NVENC が利用可能か確認
+# Is NVENC available?
 ffmpeg -encoders 2>$null | Select-String "nvenc"
 
-# h264_mf（Windows Media Foundation）が利用可能か確認
+# Is h264_mf (Windows Media Foundation) available?
 ffmpeg -encoders 2>$null | Select-String "h264_mf"
 ```
 
-NVENC が表示されない場合:
+If NVENC is not listed:
 
-- NVIDIA GPU が搭載されていない、またはドライバーが古い
-- FFmpeg が NVENC サポート付きでビルドされていない
+- There is no NVIDIA GPU, or the driver is too old
+- FFmpeg was built without NVENC support
 
-h264_mf が表示されない場合:
+If h264_mf is not listed:
 
-- Windows Media Foundation が利用不可の環境（Server Core など）
-- `codec` および `fallback_codec` の両方を使用環境に合わせて設定してください
+- Windows Media Foundation is unavailable (for example Server Core)
+
+Set both `codec` and `fallback_codec` to encoders that exist in your FFmpeg build. Note that the LGPL FFmpeg builds shipped with releases do not include `libx264`.
 
 ### `avcodec_open2 failed: Option rc not found` (NVENC)
 
-古い FFmpeg バージョンでの可能性があります。avcodec ≥ 62 の FFmpeg を使用してください。
-
-### 色味がおかしい（赤と青が逆）
-
-**原因:** SpoutDX の `ReceiveImage(bRGB=false)` は RGBA を出力しますが、エンコーダーが BGRA として処理している。
-
-**修正:** `encoder_controller.cpp` の `sws_getContext` の入力フォーマットを `AV_PIX_FMT_BGRA` → `AV_PIX_FMT_RGBA` に変更し、再ビルドしてください（本プロジェクトでは修正済み）。
+This can happen with an old FFmpeg. Use an FFmpeg with avcodec 62 or later (the version the DLLs in [build.md](build.md) come from).
 
 ---
 
-## RTSP 関連
+## RTSP
 
 ### `RTSP_CONNECT_FAILED`
 
-**確認事項:**
+**Things to check:**
 
-1. **MediaMTX が起動しているか**
+1. **Is MediaMTX running?**
    ```powershell
    Get-Process mediamtx -ErrorAction SilentlyContinue
    ```
 
-2. **ネットワーク疎通確認**
+2. **Network reachability**
    ```powershell
    Test-NetConnection -ComputerName 192.168.0.100 -Port 8554
    ```
 
-3. **ファイアウォール** — MediaMTX が動作しているホストで TCP 8554 のインバウンドを許可しているか確認
+3. **Firewall**: check that inbound TCP 8554 is allowed on the host running MediaMTX
 
-4. **URL フォーマット** — `rtsp://` から始まり、ポート番号が正しいか確認
+4. **URL format**: it must start with `rtsp://` and have the correct port
 
-### `RTSP_SEND_FAILED` が頻発する
+### Frequent `RTSP_SEND_FAILED`
 
-**原因・対処:**
+**Causes and fixes:**
 
-- **ネットワーク帯域不足** — `encoder.bitrate_kbps` を下げる（例: 4000 → 2000）
-- **送信タイムアウトが短い** — `rtsp.send_timeout_ms` を増やす（例: 5000 → 10000）
-- **MediaMTX の設定** — `mediamtx.yml` の `writeQueueSize` を増やす
+- **Insufficient network bandwidth**: lower `encoder.bitrate_kbps` (for example 4000 → 2000)
+- **Send timeout too short**: raise `rtsp.send_timeout_ms` (for example 5000 → 10000)
+- **MediaMTX settings**: increase `writeQueueSize` in `mediamtx.yml`
 
-### 再接続が `max_reconnect_attempts` 回を超えて `FATAL` になる
+### Reconnects exceed `max_reconnect_attempts` and the state goes `FATAL`
 
-`max_reconnect_attempts` の値を増やすか、MediaMTX を安定した環境で実行してください。
+Increase `max_reconnect_attempts`, or run MediaMTX in a more stable environment. When the limit is exceeded, `RTSP_TIMEOUT` is logged.
 
 ```json
 "rtsp": {
@@ -206,50 +183,55 @@ h264_mf が表示されない場合:
 
 ---
 
-## ビルド関連
+## Build
 
-### `SpoutFrameCount.cpp` のコンパイルエラー（`TIMECAPS` 未定義等）
+### `SpoutFrameCount.cpp` compile error (`TIMECAPS` undefined, etc.)
 
-`WIN32_LEAN_AND_MEAN` が定義された状態で Spout2 ソースをコンパイルすると `mmsystem.h` がインクルードされず、マルチメディアタイマー API が使えなくなります。
+Compiling the Spout2 sources with `WIN32_LEAN_AND_MEAN` defined leaves out `mmsystem.h`, so the multimedia timer API is unavailable.
 
-`CMakeLists.txt` で Spout2 ソースを `spout2_static` ターゲットとして `WIN32_LEAN_AND_MEAN` なしでコンパイルしていることを確認してください。
+Check that `CMakeLists.txt` compiles the Spout2 sources as the `spout2_static` target without `WIN32_LEAN_AND_MEAN`.
 
 ### `_mm_shuffle_epi8 was not declared in this scope`
 
-`SpoutCopy.cpp` は SSSE3 命令を使用します。`CMakeLists.txt` に以下が設定されているか確認:
+`SpoutCopy.cpp` uses SSSE3 instructions. Check that `CMakeLists.txt` contains:
 
 ```cmake
-set_source_files_properties(SpoutCopy.cpp PROPERTIES COMPILE_FLAGS "-mssse3 -msse4.1")
+set_source_files_properties(
+    ${SPOUT2_GL_DIR}/SpoutCopy.cpp
+    PROPERTIES COMPILE_FLAGS "-mssse3 -msse4.1")
 ```
 
-### リンクエラー: `GetFileVersionInfoA` が未解決
+### Link error: unresolved `GetFileVersionInfoA`
 
-`version` ライブラリのリンクが必要です。`CMakeLists.txt` の `spout2_static` ターゲットに以下があることを確認:
+The `version` library must be linked. Check that the `spout2_static` target in `CMakeLists.txt` links it:
 
 ```cmake
-target_link_libraries(spout2_static PRIVATE version)
+target_link_libraries(spout2_static PUBLIC
+    d3d11 dxgi ole32 gdi32 user32 psapi winmm version)
 ```
 
 ---
 
-## E2E テスト手順
+## Manual end-to-end check
+
+For automated E2E tests see [testing.md](testing.md). A quick manual check:
 
 ```powershell
-# 1. MediaMTX 起動
-Start-Process deps\mediamtx\mediamtx.exe
+# 1. Start MediaMTX (installed separately)
+Start-Process mediamtx
 
-# 2. テスト用 Spout センダー起動（実際の Spout 送信側がない場合）
+# 2. Start the test Spout sender (when there is no real Spout sender)
 Start-Process build\spout_test_sender.exe
 
-# 3. Publisher 起動
+# 3. Start the publisher
 .\build\spout-relay.exe --config config\config.json
 
-# 4. FFprobe で確認
+# 4. Check with ffprobe
 ffprobe rtsp://192.168.0.100:8554/live
 
-# 5. 5 秒間録画してフレーム数確認
+# 5. Record 5 seconds and check the frame count
 ffmpeg -i rtsp://192.168.0.100:8554/live -t 5 -c copy test_out.mp4
-ffprobe -v quiet -select_streams v:0 -show_entries stream=nb_read_frames -of csv test_out.mp4
+ffprobe -v quiet -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of csv test_out.mp4
 ```
 
-正常動作: 5 秒で 140〜150 フレーム程度（30fps の場合）
+Expected: roughly 140 to 150 frames in 5 seconds at 30 fps. `spout_test_sender.exe` takes the sender name as an optional first argument (default `TestSpoutSender`); make sure `spout.sender_name` matches it.

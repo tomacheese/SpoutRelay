@@ -105,7 +105,7 @@ std::string MetricsStore::build_health_json(bool with_ts) const {
         std::lock_guard<std::mutex> lk(mutex_);
         state = current_state_;
     }
-    // PLACEHOLDER は NO SIGNAL 映像を継続配信中の正常な状態のため healthy とする
+    // PLACEHOLDER is a normal state (continuously streaming NO SIGNAL video), so it is healthy
     bool healthy = (state == "STREAMING"   || state == "CONNECTING_OUTPUT" ||
                     state == "PROBING"     || state == "IDLE" ||
                     state == "PLACEHOLDER");

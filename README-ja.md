@@ -1,6 +1,8 @@
-# Spout RTSP Publisher
+# SpoutRelay
 
-[Spout2](https://spout.zeal.co/) の GPU 共有テクスチャからフレームをキャプチャし、FFmpeg（NVENC → libx264 フォールバック）で H.264 エンコードして RTSP サーバー（[MediaMTX](https://github.com/bluenviron/mediamtx) 等）へ配信する Windows アプリケーションです。
+> This is a Japanese translation of [README.md](README.md). The documentation in `docs/` is in English.
+
+[Spout2](https://spout.zeal.co/) の GPU 共有テクスチャからフレームをキャプチャし、FFmpeg（NVENC → h264_mf フォールバック）で H.264 エンコードして RTSP サーバー（[MediaMTX](https://github.com/bluenviron/mediamtx) 等）へ配信する Windows アプリケーションです。
 
 ## 特徴
 
@@ -147,7 +149,7 @@ SpoutRelay/
 │   ├── rtsp/         # FFmpeg RTSP ANNOUNCE/RECORD クライアント
 │   └── spout/        # SpoutDX レシーバー（SpoutMonitor）
 ├── tests/
-│   ├── unit/         # カスタムテストランナーによるユニットテスト（約 104 [PASS]）
+│   ├── unit/         # カスタムテストランナーによるユニットテスト
 │   └── spout_test_sender/  # E2E テスト用カラーサイクル DX11 Spout センダー
 ├── e2e-test/         # PowerShell 7+ E2E・モンキーテストスクリプト
 ├── config/
@@ -172,7 +174,7 @@ SpoutRelay/
 
 ```powershell
 build/tests/publisher_tests.exe
-# 期待結果: All tests passed. (104 件の [PASS])
+# 期待結果: All tests passed.
 ```
 
 テストの分類・実行方法の詳細は [docs/testing.md](docs/testing.md) を参照してください。

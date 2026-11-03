@@ -1,139 +1,144 @@
-# アーキテクチャ
+# Architecture
 
-## システム概要
+## System overview
 
 ```text
-┌─────────────────┐      DX11共有テクスチャ      ┌──────────────────────┐
-│   Spout送信側    │ ─────────────────────────▶  │   SpoutMonitor       │
-│ (VRChat等)      │      (GPU shared memory)     │   (SpoutDX)          │
-└─────────────────┘                              └──────────┬───────────┘
-                                                            │ RGBA フレーム
-                                                            ▼
-                                                 ┌──────────────────────┐
-                                                 │   FramePump          │
-                                                 │   (有界キュー 最大4)  │
-                                                 └──────────┬───────────┘
-                                                            │
-                                                            ▼
-                                                 ┌──────────────────────┐
-                                                 │  EncoderController   │
-                                                 │  NVENC → libx264     │
-                                                 │  (FFmpeg + swscale)  │
-                                                 └──────────┬───────────┘
-                                                            │ H.264 NAL パケット
-                                                            ▼
-                                                 ┌──────────────────────┐
-                                                 │  RtspPublisherClient │
-                                                 │  ANNOUNCE / RECORD   │
-                                                 │  (FFmpeg TCP)        │
-                                                 └──────────┬───────────┘
-                                                            │ RTP/TCP
-                                                            ▼
-                                                 ┌──────────────────────┐
-                                                 │   MediaMTX (等)      │
-                                                 │   RTSP サーバー      │
-                                                 └──────────────────────┘
+┌─────────────────┐   DX11 shared texture   ┌──────────────────────┐
+│  Spout sender   │ ──────────────────────▶ │   SpoutMonitor       │
+│  (VRChat etc.)  │   (GPU shared memory)   │   (SpoutDX)          │
+└─────────────────┘                         └──────────┬───────────┘
+                                                       │ RGBA frame
+                                                       ▼
+                                            ┌──────────────────────┐
+                                            │   FramePump          │
+                                            │   (bounded queue, 4) │
+                                            └──────────┬───────────┘
+                                                       │
+                                                       ▼
+                                            ┌──────────────────────┐
+                                            │  EncoderController   │
+                                            │  NVENC → fallback    │
+                                            │  (FFmpeg + swscale)  │
+                                            └──────────┬───────────┘
+                                                       │ H.264 packets
+                                                       ▼
+                                            ┌──────────────────────┐
+                                            │  RtspPublisherClient │
+                                            │  ANNOUNCE / RECORD   │
+                                            │  (FFmpeg, TCP)       │
+                                            └──────────┬───────────┘
+                                                       │ RTP/TCP
+                                                       ▼
+                                            ┌──────────────────────┐
+                                            │   MediaMTX (etc.)    │
+                                            │   RTSP server        │
+                                            └──────────────────────┘
 ```
 
-## コンポーネント説明
+## Components
 
-| コンポーネント | クラス | 役割 |
-|-------------|--------|------|
-| オーケストレーター | `Supervisor` | ステートマシン実行、全コンポーネントのライフサイクル管理 |
-| ステートマシン | `StateMachine` | 状態遷移テーブルの強制、コールバック通知 |
-| Spout 受信 | `SpoutMonitor` | SpoutDX による DX11 共有テクスチャ受信、RGBA ピクセル取得 |
-| キャプチャキュー | `FramePump` | キャプチャスレッド実行、最大 4 フレームの有界キュー |
-| エンコーダー | `EncoderController` | FFmpeg H.264 エンコード（NVENC/libx264）、swscale RGBA→YUV |
-| RTSP クライアント | `RtspPublisherClient` | FFmpeg RTSP ANNOUNCE+SETUP+RECORD、RTP パケット送信 |
-| メトリクス | `MetricsStore` | スレッドセーフなカウンター、health.json / metrics.json 出力 |
-| ログ | `LogSink` | spdlog ベース JSON Lines ログ（ファイル＋コンソール） |
-| 設定 | `ConfigLoader` | nlohmann/json による設定ロード・バリデーション |
+| Component | Class | Role |
+|-----------|-------|------|
+| Orchestrator | `Supervisor` | Runs the state machine and manages the lifecycle of all components |
+| State machine | `StateMachine` | Enforces the transition table and notifies via callback |
+| Spout receiver | `SpoutMonitor` | Receives the DX11 shared texture through SpoutDX (GPU texture or RGBA pixels) |
+| Capture queue | `FramePump` | Runs the capture thread and holds a bounded queue of at most 4 frames |
+| Encoder | `EncoderController` | FFmpeg H.264 encoding (NVENC or a fallback codec), swscale RGBA→YUV on the CPU path |
+| RTSP client | `RtspPublisherClient` | FFmpeg RTSP ANNOUNCE + SETUP + RECORD, sends RTP packets |
+| Placeholder | `render_placeholder_frame()` | Renders the NO SIGNAL frame (see [configuration](configuration.md#placeholder-section)) |
+| Metrics | `MetricsStore` | Thread-safe counters, writes `health.json` / `metrics.json` |
+| Logging | `LogSink` | spdlog-based JSON Lines log (file and console) |
+| Configuration | `ConfigLoader` | Config loading and validation with nlohmann/json |
 
-## データフロー
+## Data flow
 
 ```text
-[SpoutDX GPU受信]
+[SpoutDX receive]
        │
-       │  ReceiveImage() → RGBA バイト列
+       │  ReceiveImage() → RGBA bytes (or ReceiveTexture() on the GPU path)
        ▼
-[FrameBuffer (RGBA)]
+[FrameBuffer]
        │
-       │  push (非ブロッキング、満杯なら drop)
+       │  push (non-blocking; when full, the oldest frame is dropped)
        ▼
-[有界キュー (max=4)]
+[bounded queue (max=4)]
        │
-       │  pop (エンコードスレッド)
+       │  pop (encode thread)
        ▼
-[sws_scale: RGBA → YUV420P/NV12]
+[sws_scale: RGBA → YUV420P/NV12]   (CPU path only)
        │
        │  avcodec_send_frame / avcodec_receive_packet
        ▼
-[AVPacket (H.264 NAL)]
+[AVPacket (H.264)]
        │
        │  av_interleaved_write_frame
        ▼
 [RTSP RTP/TCP → MediaMTX]
 ```
 
-## スレッドモデル
+With a hardware codec and a D3D11 device, the GPU zero-copy path copies the Spout texture straight into the encoder's hardware frame pool instead (logged as `gpu_zero_copy_enabled`). If GPU initialisation fails, the encoder falls back to the CPU path above.
+
+## Thread model
 
 ```text
-メインスレッド (Supervisor::run)
+Main thread (Supervisor::run)
 │
-├── ステートマシンループ
-│   └── 各状態ハンドラーが同期的にポーリング
-│       (PROBING: 50ms, STREAMING: 33ms サイクル)
+├── State machine loop
+│   └── Each state handler polls synchronously
 │
-├── キャプチャスレッド (FramePump)
-│   └── SpoutMonitor::receive_latest_frame() をポーリング
-│       → FrameBuffer をキューへ push
+├── Capture thread (FramePump)
+│   └── Polls SpoutMonitor::receive_latest_frame() every spout.poll_interval_ms
+│       → pushes FrameBuffer into the queue
 │
-└── メトリクスライタースレッド (Supervisor::metrics_writer_thread_func)
-    └── 1秒ごとに health.json / metrics.json を書き出し
+├── Encode thread (Supervisor::start_encode_thread)
+│   └── Pops frames, encodes and sends packets while STREAMING
+│
+└── Metrics writer thread (Supervisor::metrics_writer_thread_func)
+    └── Writes health.json / metrics.json at the configured emit intervals
 ```
 
-### スレッド間通信
+### Inter-thread communication
 
-| From | To | 手段 |
-|------|----|------|
-| キャプチャスレッド | ステートマシンループ | `std::queue` + `std::mutex` + `std::condition_variable` |
-| ステートマシンループ | メトリクス | `std::atomic` カウンター + `std::mutex` 保護フィールド |
-| `Supervisor::request_stop()` | 全スレッド | `std::atomic<bool> shutdown_requested_` |
+| From | To | Mechanism |
+|------|----|-----------|
+| Capture thread | Encode thread | `std::queue` + `std::mutex` + `std::condition_variable` |
+| State machine loop / encode thread | Metrics | `std::atomic` counters + `std::mutex`-protected fields |
+| `Supervisor::request_stop()` | All threads | `std::atomic<bool> shutdown_requested_` |
 
-## エンコーダーフォールバック
+## Encoder fallback
 
 ```text
-avcodec_find_encoder("h264_nvenc")
+codec (default: h264_nvenc)
       │
-      ├── 成功 → avcodec_open2()
-      │         │
-      │         ├── 成功 → NVENC使用
-      │         └── 失敗 → 次のコーデックへ
+      ├── found and avcodec_open2() succeeds → use it
       │
-      └── 失敗 → avcodec_find_encoder("libx264")
+      └── otherwise → fallback_codec (default: h264_mf)
                         │
-                        └── avcodec_open2() → libx264使用
+                        └── avcodec_open2() succeeds → use it
+                            otherwise → ENCODER_INIT_FAILED
 ```
 
-コーデック固有オプション:
+Both codec names come from the config (`encoder.codec`, `encoder.fallback_codec`); any FFmpeg encoder name available in the linked FFmpeg build can be used.
 
-| コーデック | オプション |
-|---------|---------|
-| h264_nvenc | `rc=cbr`, `delay=0`, `preset=fast` |
-| libx264 | `tune=zerolatency`, `zerolatency=1`, `preset=fast` |
+Codec-specific options:
 
-## 依存ライブラリ
+| Codec type | Options |
+|------------|---------|
+| Hardware (name contains `nvenc`, `amf` or `qsv`) | `rc=cbr`, `delay=0`, plus `preset`; `tune` is not applied |
+| Others (e.g. `h264_mf`, `libx264`, `libopenh264`) | `preset` and `tune` from the config when non-empty |
 
-| ライブラリ | 用途 | 形式 |
-|----------|------|------|
-| Spout2 SDK | DX11 テクスチャ共有 | 静的リンク (`spout2_static`) |
-| FFmpeg (avcodec/avformat/swscale) | エンコード・RTSP 配信 | 動的リンク (.dll) |
-| nlohmann/json | 設定ファイルパース | ヘッダーオンリー |
-| spdlog | 構造化ログ | ヘッダーオンリー |
+## Dependencies
 
-## 既知の技術的制約
+| Library | Purpose | Linkage |
+|---------|---------|---------|
+| Spout2 SDK | DX11 texture sharing | Static (`spout2_static`) |
+| FFmpeg (avcodec/avformat/avutil/swscale/swresample) | Encoding and RTSP publishing | Dynamic (.dll) |
+| nlohmann/json | Config parsing | Header-only (CMake `FetchContent`) |
+| spdlog | Structured logging | CMake `FetchContent` |
 
-- **RTSP トランスポート**: 現状 TCP のみ（UDP 非対応）
-- **ピクセルフォーマット**: SpoutDX からは RGBA で取得（`bRGB=false`）
-- **Spout センダー名**: 設定ファイルに固定名を指定（自動検出なし）
-- **初回フレーム取得**: 最初の `ReceiveImage()` は更新イベントとして扱われ実データなし（1 回リトライで解決）
+## Known technical constraints
+
+- **RTSP transport**: TCP only (`rtsp_transport=tcp`); UDP is not supported.
+- **Pixel format**: SpoutDX delivers RGBA on the CPU path (`bRGB=false`).
+- **Spout sender name**: a fixed name from the config file; there is no auto-discovery.
+- **First frame**: the first receive after connecting may only signal an update without pixel data, so the supervisor polls until a new frame arrives (up to `5 × spout.frame_timeout_ms`, then it returns to `PROBING`).

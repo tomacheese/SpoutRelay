@@ -1,351 +1,266 @@
-# テスト方法
+# Testing
 
-SpoutRelay のテストは、以下の 4 つのカテゴリで構成されています。何らかの実装・改修を行った後は、
-影響範囲に応じて該当するカテゴリのテストを **必ず網羅的に実施** してください。
+SpoutRelay is tested in four categories. After any implementation or change, run the categories affected by the change thoroughly.
 
-| カテゴリ | 目的 | 実行環境 | 実行コマンド |
-|---------|------|---------|-------------|
-| [ユニットテスト](#ユニットテスト) | ロジック単体の正しさを検証 | CI / ローカル (GPU・Spout 不要) | `build/tests/publisher_tests.exe` |
-| [E2E テスト](#e2e-テスト) | 実バイナリ・実 RTSP サーバーを用いた統合動作の検証 | ローカル (Windows + Spout/GPU 環境推奨) | `pwsh e2e-test/run-tests.ps1` |
-| [モンキーテスト](#モンキーテスト) | 設計書を基にしたブラックボックスでの異常系・組み合わせ検証 | ローカル (Windows + Spout/GPU 環境推奨) | `pwsh e2e-test/monkey-tests.ps1` |
-| [ユーザーテスト](#ユーザーテスト) | 実際の Spout ソース・実 RTSP サーバーでの最終確認 | 実機 (本番相当環境) | 手動 |
+| Category | Purpose | Environment | Command |
+|----------|---------|-------------|---------|
+| [Unit tests](#unit-tests) | Verify individual pieces of logic | CI / local (no GPU or Spout needed) | `build/tests/publisher_tests.exe` |
+| [E2E tests](#e2e-tests) | Integration checks with the real binary and a real RTSP server | Local (Windows with Spout/GPU recommended) | `pwsh e2e-test/run-tests.ps1` |
+| [Monkey tests](#monkey-tests) | Black-box checks of abnormal cases and combinations, based on the design docs | Local (Windows with Spout/GPU recommended) | `pwsh e2e-test/monkey-tests.ps1` |
+| [User tests](#user-tests) | Final check with a real Spout source and RTSP server | Real machine (production-like) | Manual |
 
 ---
 
-## ユニットテスト
+## Unit tests
 
-### 概要
+### Overview
 
-`tests/unit/` 以下にある各テストファイルは、CMake の `publisher_lib` をリンクした
-`publisher_tests` 実行ファイルにまとめられ、GPU や Spout SDK の実体に依存しない
-純粋なロジック・設定・状態遷移などを検証します。CI (GitHub Actions) でも実行されます。
+The test files under `tests/unit/` are built into the `publisher_tests` executable, linked against `publisher_lib`. They cover pure logic, configuration and state transitions without depending on a GPU or the Spout SDK itself. They also run in CI (GitHub Actions).
 
-独自の軽量テストフレームワーク (`tests/unit/test_utils.hpp`) を使用しており、
-`VERIFY` / `VERIFY_MSG` マクロでアサーションを行います。失敗時は `std::exit(1)` で
-即座に終了し、`[FAIL] ...` を標準エラー出力に表示します。
+A small custom test framework (`tests/unit/test_utils.hpp`) is used; assertions are made with the `VERIFY` / `VERIFY_MSG` macros. On failure the process prints `[FAIL] ...` to standard error and exits immediately with `std::exit(1)`.
 
-### テストファイル一覧
+### Test files
 
-| ファイル | 内容 |
-|---------|------|
-| `tests/unit/test_config_loader.cpp` | 設定ファイル (`config.json`) のロード・バリデーションルール (エントリポイント `main()`) |
-| `tests/unit/test_state_machine.cpp` | `StateMachine` の状態遷移ルール (有効/無効な遷移の組み合わせ) |
-| `tests/unit/test_metrics_store.cpp` | `MetricsStore` のメトリクス集計・JSON 出力 |
-| `tests/unit/test_atomic_file.cpp` | `atomic_file::write` のアトミック置換 (旧ファイル保持・tmp 後始末・書き込み/置換失敗時の挙動) |
-| `tests/unit/test_backoff.cpp` | 再接続バックオフ計算ロジック |
-| `tests/unit/test_placeholder_renderer.cpp` | NO SIGNAL プレースホルダ映像の生成ロジック |
-| `tests/unit/test_log_sink.cpp` | JSON Lines ログ出力 (`LogSink`) のフォーマット・エスケープ・エラーハンドリング |
-| `tests/unit/test_frame_pump.cpp` | `FramePump` のフレームキュー・キュー溢れ時の挙動・停止処理 |
-| `tests/unit/test_supervisor_logic.cpp` | `Supervisor` から抽出した純粋ロジック (`supervisor_logic.hpp`) のシームレス切替判定・解像度変更検出 |
+| File | Content |
+|------|---------|
+| `tests/unit/test_config_loader.cpp` | Loading and validation rules of the config file (also holds the `main()` entry point) |
+| `tests/unit/test_state_machine.cpp` | `StateMachine` transition rules (valid and invalid combinations) |
+| `tests/unit/test_metrics_store.cpp` | `MetricsStore` aggregation and JSON output |
+| `tests/unit/test_atomic_file.cpp` | Atomic replacement by `atomic_file::write` (keeping the old file, tmp cleanup, behaviour on write/replace failures) |
+| `tests/unit/test_backoff.cpp` | Reconnect back-off calculation |
+| `tests/unit/test_placeholder_renderer.cpp` | Generation of the NO SIGNAL placeholder frame |
+| `tests/unit/test_log_sink.cpp` | `LogSink` JSON Lines format, escaping and error handling |
+| `tests/unit/test_frame_pump.cpp` | `FramePump` queue, behaviour on overflow, and stopping |
+| `tests/unit/test_supervisor_logic.cpp` | Pure logic extracted from `Supervisor` (`supervisor_logic.hpp`): seamless handoff decision, resolution-change detection |
 
-### 実行方法
+### How to run
 
 ```powershell
-# ビルド (初回 or ソース変更後)
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+# Build (first time or after source changes)
+cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=toolchain-mingw.cmake
 cmake --build build --target publisher_tests -j 4
 
-# 実行
+# Run
 .\build\tests\publisher_tests.exe
 ```
 
-### 期待される出力
+### Expected output
 
-各テストブロックごとに `[PASS] ...` が出力され、最後に以下が表示されます。
+Each test block prints `[PASS] ...` lines, and the run ends with:
 
 ```text
 All tests passed.
 ```
 
-PASS 件数はテストの追加に応じて変動します。1 件でも `[FAIL]` が出力された場合、
-そのアサーションの内容と発生箇所 (ファイル名・行番号) が表示されて即座に終了します。
+The number of `[PASS]` lines changes as tests are added. If any `[FAIL]` is printed, the failing assertion and its location (file and line) are shown and the process exits immediately.
 
-### 新規ロジック追加時の方針
+### Guidelines when adding logic
 
-- 新しい純粋関数 (副作用・スレッド・GPU/ファイル I/O に依存しないロジック) を追加する場合は、
-  可能な限り `src/app/` 等の小さなヘッダ/関数として切り出し、対応するユニットテストを追加してください。
-- `Supervisor` のように巨大なクラスに判定ロジックを直接書くと単体テストが困難になるため、
-  `supervisor_logic.hpp` のように関数を抽出して `tests/unit/test_supervisor_logic.cpp` から検証する
-  パターンを参考にしてください。
-- 設定バリデーションを追加した場合は、`test_config_loader.cpp` に「不正な値を与えて
-  `ConfigLoader::load()` が `false` を返すこと」を確認するテスト関数を追加してください。
+- When adding a pure function (no side effects, threads, GPU or file I/O), extract it into a small header or function under `src/app/` or similar and add a unit test.
+- Decision logic written directly inside a large class such as `Supervisor` is hard to unit test. Follow the `supervisor_logic.hpp` pattern: extract the function and verify it from `tests/unit/test_supervisor_logic.cpp`.
+- When adding configuration validation, add a test function to `test_config_loader.cpp` that passes an invalid value and checks that `ConfigLoader::load()` returns `false`.
 
 ---
 
-## E2E テスト
+## E2E tests
 
-### 概要
+### Overview
 
-`e2e-test/` 以下の PowerShell 7+ スクリプトは、実際の `spout-relay.exe` バイナリ、
-mediamtx (RTSP サーバー)、および Spout テスト送出元 (`spout_test_sender` 等) を起動し、
-ステートマシンの遷移やストリーム配信の挙動を実際の RTSP ストリームを通じて検証します。
+The PowerShell 7+ scripts under `e2e-test/` start the real `spout-relay.exe`, mediamtx (RTSP server) and Spout test senders (`spout_test_sender` etc.), and verify state transitions and streaming behaviour through real RTSP streams.
 
-GPU エンコード (D3D11VA + NVENC) を利用する Spout/GPU 環境での実行を推奨しますが、
-CPU フォールバック (libopenh264 / h264_mf) のテストも含まれます。
+Running on a Spout/GPU environment with GPU encoding (D3D11VA + NVENC) is recommended, but the tests also cover CPU fallback (`libopenh264` / `h264_mf`).
 
-### 前提条件
+### Prerequisites
 
-- Windows + PowerShell 7+ (`pwsh`)
-- `mediamtx`、`ffmpeg`/`ffprobe` が PATH 上にあること
-- `spout-relay.exe`、`spout_test_sender.exe`、`spout_static_sender.exe`、
-  `spout_res_changer.exe` がビルド済みであること (`build/` 以下)
-- `e2e-test/config/` に各シナリオ用の設定ファイルが存在すること
-  (`config.json`, `config_fatal.json`, `config_libopenh264.json`, `config_placeholder.json`)
+- Windows and PowerShell 7+ (`pwsh`)
+- `mediamtx` and `ffmpeg`/`ffprobe` on `PATH`
+- `spout-relay.exe`, `spout_test_sender.exe`, `spout_static_sender.exe` and `spout_res_changer.exe` built (under `build/`)
+- Per-scenario config files in `e2e-test/config/`: `config.json`, `config_fatal.json`, `config_libopenh264.json`, `config_placeholder.json`
 
-### 実行方法
+### How to run
+
+The scripts resolve paths from `$PSScriptRoot`, so they can be run from the repository root or from inside `e2e-test/`.
 
 ```powershell
 cd e2e-test
-pwsh ./run-tests.ps1       # Test 1-3 (RTSP 再接続・フリーズフレーム・長時間安定性)
-pwsh ./monkey-tests.ps1    # Test 4-11 (異常系・組み合わせシナリオ一式)
-pwsh ./run-new-tests.ps1   # Test 8-11 のみを個別実行 (monkey-tests.ps1 の一部を切り出したもの)
-pwsh ./cli-tests.ps1       # CLI 引数・終了コード・Ctrl+C グレースフルシャットダウン
-pwsh ./state-files-tests.ps1  # state/health.json・state/metrics.json の直接検証
-pwsh ./multi-instance-tests.ps1  # 複数インスタンス同時起動時の競合確認
-pwsh ./encoder-config-tests.ps1  # エンコーダー設定バリエーション (h264_mf 直接指定・極端なビットレート等)
+pwsh ./run-tests.ps1             # Tests 1-3 (RTSP reconnect, freeze frame, stability)
+pwsh ./monkey-tests.ps1          # Tests 4-11 (abnormal cases and combinations)
+pwsh ./run-new-tests.ps1         # Tests 8-11 only (a subset of monkey-tests.ps1)
+pwsh ./cli-tests.ps1             # CLI arguments, exit codes, Ctrl+Break graceful shutdown
+pwsh ./state-files-tests.ps1     # Direct checks of health.json / metrics.json
+pwsh ./multi-instance-tests.ps1  # Conflicts when several instances run at once
+pwsh ./encoder-config-tests.ps1  # Encoder setting variations (h264_mf, extreme bitrates, etc.)
 ```
 
-各スクリプトは独立して `mediamtx` / `spout-relay` 等のプロセスを起動・停止するため、
-実行前に既存プロセスが残っていないことを確認してください (スクリプト先頭の
-`Stop-AllProcs` が自動的に後始末を行います)。
+Each script starts and stops its own `mediamtx` / `spout-relay` processes, so make sure no leftover processes exist before running (the `Stop-AllProcs` function at the top of each script cleans up).
 
-### テストシナリオ一覧
+### Scenarios
 
-#### `run-tests.ps1` (Test 1-3)
+#### `run-tests.ps1` (Tests 1-3)
 
-| # | シナリオ | 検証内容 |
-|---|---------|---------|
-| 1 | RTSP 再接続直後の IDR 送出 (Bug #3) | mediamtx 再起動後、再接続時に IDR (I フレーム) が即座に送出されること |
-| 2 | フリーズフレーム保持 (Bug #5') | 再接続後、直前のフレームを使ってストリームが即座に再開すること |
-| 3 | 長時間配信の安定性 (Bug #7) | 15 秒間の連続配信でエンコードエラーが発生しないこと |
+| # | Scenario | What is verified |
+|---|----------|------------------|
+| 1 | IDR right after RTSP reconnect (Bug #3) | After restarting mediamtx, an IDR (I-frame) is sent immediately on reconnect |
+| 2 | Freeze-frame retention (Bug #5') | After reconnecting, the stream resumes immediately using the last frame |
+| 3 | Long-running stability (Bug #7) | No encode errors occur during 15 seconds of continuous streaming |
 
-#### `monkey-tests.ps1` (Test 4-11)
+#### `monkey-tests.ps1` (Tests 4-11)
 
-| # | シナリオ | 検証内容 |
-|---|---------|---------|
-| 4 | Sender 切断 → STALLED → 復帰 | STREAMING 中に Spout ソースが消えた際 STALLED に遷移し、復帰後 STREAMING に戻ること |
-| 5 | Placeholder モード | Sender 未接続時に NO SIGNAL 映像を配信し、Sender 接続後にシームレスにハンドオフすること |
-| 6 | 連続 RTSP 再接続 (3 回) | mediamtx を 3 回連続で kill/再起動しても再接続できること |
-| 7 | CPU コーデック (libopenh264) 直接使用 | GPU を使わない設定でも正常にエンコード・配信できること |
-| 8 | STALLED → sender_disappeared → PROBING | プレースホルダ無効時、Sender 消失で PROBING に遷移し、復帰できること |
-| 9 | GPU STREAMING → sender_disappeared → PLACEHOLDER シームレス | GPU モードでの Sender 消失時にシームレスに PLACEHOLDER へ切り替わること |
-| 10 | 解像度変更 (640x360 → 320x240, RECONFIGURING) | `spout_res_changer` による解像度変更で RECONFIGURING を経て STREAMING に復帰すること |
-| 11 | `max_reconnect_attempts` 超過 → FATAL | 再接続上限を超えた場合に FATAL 状態へ遷移すること |
+| # | Scenario | What is verified |
+|---|----------|------------------|
+| 4 | Sender disconnect → STALLED → recovery | When the Spout source disappears during STREAMING the state becomes STALLED, and returns to STREAMING after it comes back |
+| 5 | Placeholder mode | NO SIGNAL video is published while no sender is connected, and hands off seamlessly once the sender connects |
+| 6 | Three consecutive RTSP reconnects | The relay reconnects after mediamtx is killed and restarted three times in a row |
+| 7 | CPU codec (`libopenh264`) used directly | Encoding and publishing work without a GPU |
+| 8 | STALLED → sender_disappeared → PROBING | With the placeholder disabled, the sender disappearing leads back to probing and recovers |
+| 9 | GPU STREAMING → sender_disappeared → PLACEHOLDER (seamless) | In GPU mode, losing the sender switches seamlessly to PLACEHOLDER |
+| 10 | Resolution change (640x360 → 320x240, RECONFIGURING) | A resolution change by `spout_res_changer` goes through RECONFIGURING and returns to STREAMING |
+| 11 | `max_reconnect_attempts` exceeded → FATAL | Exceeding the reconnect limit ends in the FATAL state |
 
 #### `run-new-tests.ps1`
 
-`monkey-tests.ps1` の Test 8-11 のみを単独実行するためのスクリプトです。
-Test 8-11 のみを再検証したい場合に利用してください。
+Runs only Tests 8-11 of `monkey-tests.ps1` on their own. Use it to re-verify just those tests.
 
 #### `cli-tests.ps1`
 
-`main.cpp` の CLI 引数処理・終了コード・グレースフルシャットダウンを検証します。
-mediamtx や Spout センダーは不要です。
+Verifies the CLI argument handling, exit codes and graceful shutdown of `main.cpp`. Neither mediamtx nor a Spout sender is needed.
 
-| # | シナリオ | 検証内容 |
-|---|---------|---------|
-| 1 | `--help` | 使用方法を表示して終了コード 0 |
-| 2 | `-h` | `--help` と同様 |
-| 3 | 存在しない設定ファイル | 終了コード 1、`[ERROR]` を表示 |
-| 4 | 不正な JSON の設定ファイル | 終了コード 1、`[ERROR]` を表示 |
-| 5 | `-c` (短縮形) | `--config` と同様に動作 |
-| 6 | 設定ファイル未指定 | デフォルトパス (`config/config.json`) が使われ、存在しなければ終了コード 1 |
-| 7 | `Supervisor::init` 失敗 (`log_dir` がファイルに占有) | 終了コード 1、`[ERROR]` を表示 |
-| 8 | `CTRL_BREAK_EVENT` 送信 | `console_ctrl_handler` がグレースフルシャットダウンし、終了コード 0 |
+| # | Scenario | What is verified |
+|---|----------|------------------|
+| 1 | `--help` | Prints usage and exits with code 0 |
+| 2 | `-h` | Same as `--help` |
+| 3 | Nonexistent config file | Exit code 1 and `[ERROR]` is printed |
+| 4 | Config file with invalid JSON | Exit code 1 and `[ERROR]` is printed |
+| 5 | `-c` (short form) | Behaves like `--config` |
+| 6 | No config file given | The default path (`config/config.json`) is used; exit code 1 if it does not exist |
+| 7 | `Supervisor::init` failure (`log_dir` occupied by a file) | Exit code 1 and `[ERROR]` is printed |
+| 8 | `CTRL_BREAK_EVENT` | `console_ctrl_handler` shuts down gracefully with exit code 0 |
 
 #### `state-files-tests.ps1`
 
-`MetricsStore` が出力する `state/health.json` / `state/metrics.json` の
-JSON 構造・値を実際のリレー実行を通じて直接検証します。
+Verifies the structure and values of the `state/health.json` / `state/metrics.json` files written by `MetricsStore` during real relay runs.
 
-| # | シナリオ | 検証内容 |
-|---|---------|---------|
-| 1 | PLACEHOLDER 配信中 | `health.json` の `healthy`/`state`/`ts` フィールド、`state == "PLACEHOLDER"`、`healthy == true`、`ts` が有効な ISO 8601 であること。`metrics.json` の全フィールド存在、`state`/`rtsp_url`/`encoder_codec`/`uptime_ms`/`frames_encoded` の値が妥当であること |
-| 2 | `max_reconnect_attempts` 超過 → FATAL | リレー終了後の `health.json` で `state == "FATAL"`、`healthy == false` であること |
+| # | Scenario | What is verified |
+|---|----------|------------------|
+| 1 | While publishing PLACEHOLDER | `health.json` has `healthy`/`state`/`ts`, with `state == "PLACEHOLDER"`, `healthy == true` and a valid ISO 8601 `ts`. `metrics.json` has all fields, with plausible `state`/`rtsp_url`/`encoder_codec`/`uptime_ms`/`frames_encoded` |
+| 2 | `max_reconnect_attempts` exceeded → FATAL | After the relay exits, `health.json` has `state == "FATAL"` and `healthy == false` |
 
 #### `multi-instance-tests.ps1`
 
-`instance_name` / `sender_name` / `rtsp.url` / `metrics_path` / `health_path` を
-それぞれ変えた 2 つの spout-relay インスタンスを同一マシン上で同時起動し、
-ログファイル・state ファイル・RTSP ストリームが競合・混在しないことを検証します。
+Starts two spout-relay instances at once on one machine, with different `instance_name` / `sender_name` / `rtsp.url` / `metrics_path` / `health_path`, and verifies that log files, state files and RTSP streams neither collide nor mix.
 
-| # | シナリオ | 検証内容 |
-|---|---------|---------|
-| 1 | 2 インスタンス同時起動 | それぞれ独立して `publish_started` (STREAMING) に到達すること |
-| 2 | ログファイルの分離 | `{instance_name}.jsonl` がインスタンス毎に分離され、互いのイベントが混在しないこと |
-| 3 | state ファイルの分離 | `metrics_*.json` / `health_*.json` がインスタンス毎に分離され、各自の `sender_name`/`rtsp_url` を反映すること |
-| 4 | RTSP ストリームの独立性 | 両インスタンスの RTSP ストリームがそれぞれ個別に再生可能であること |
+| # | Scenario | What is verified |
+|---|----------|------------------|
+| 1 | Two instances start together | Each independently reaches `publish_started` (STREAMING) |
+| 2 | Log file isolation | `{instance_name}.jsonl` is separate per instance and events do not mix |
+| 3 | State file isolation | `metrics_*.json` / `health_*.json` are separate per instance and reflect each one's `sender_name`/`rtsp_url` |
+| 4 | RTSP stream independence | Both RTSP streams can be played separately |
 
 #### `encoder-config-tests.ps1`
 
-`config.json` の `encoder`/`spout` セクションの値を変えた構成で、spout-relay が
-正常に STREAMING に到達し RTSP ストリームを配信できることを検証します。
+Verifies that spout-relay reaches STREAMING and publishes an RTSP stream with various `encoder`/`spout` settings.
 
-| # | シナリオ | 検証内容 |
-|---|---------|---------|
-| 1 | `codec: "h264_mf"` を直接指定 (フォールバックなし) | STREAMING に到達し配信できること |
-| 2 | 極端に低いビットレート (`bitrate_kbps: 100`) | STREAMING に到達し配信できること |
-| 3 | 極端に高いビットレート (`bitrate_kbps: 50000`) | STREAMING に到達し配信できること |
-| 4 | `max_b_frames: 2` (h264_mf) | STREAMING に到達し配信できること |
-| 5 | `prefer_dx11: false` | `prefer_dx11_ignored` 警告が出ても正常に配信できること |
-| 6 | 低 FPS (`fps: 5`) | STREAMING に到達し配信できること |
-| 7 | 高 FPS (`fps: 60`) | STREAMING に到達し配信できること |
+| # | Scenario | What is verified |
+|---|----------|------------------|
+| 1 | `codec: "h264_mf"` set directly (no fallback) | Reaches STREAMING and publishes |
+| 2 | Extremely low bitrate (`bitrate_kbps: 100`) | Reaches STREAMING and publishes |
+| 3 | Extremely high bitrate (`bitrate_kbps: 50000`) | Reaches STREAMING and publishes |
+| 4 | `max_b_frames: 2` (h264_mf) | Reaches STREAMING and publishes |
+| 5 | `prefer_dx11: false` | Publishes normally even though a `prefer_dx11_ignored` warning is logged |
+| 6 | Low FPS (`fps: 5`) | Reaches STREAMING and publishes |
+| 7 | High FPS (`fps: 60`) | Reaches STREAMING and publishes |
 
-### 期待される出力
+### Expected output
 
-各テストは `[PASS] ...` / `[FAIL] ...` を出力し、スクリプト終了時に
-`Pass`/`Fail` カウントのサマリーが表示されます。`[FAIL]` が 1 件でもあれば
-問題が修正されるまで対応してください。
+Each test prints `[PASS] ...` / `[FAIL] ...`, and a summary of `Pass`/`Fail` counts is shown when the script ends. Fix the problem if even one `[FAIL]` appears.
 
 ---
 
-## モンキーテスト
+## Monkey tests
 
-issue で定義されている「モンキーテスト」は、設計書 (`docs/` 以下のアーキテクチャ・
-ステートマシン定義) を基に、ブラックボックスとして想定外の入力・タイミング・組み合わせを
-試す探索的テストです。本リポジトリでは `e2e-test/monkey-tests.ps1` (Test 4-11) が
-これに該当し、上記の E2E テストと同じ枠組み・実行コマンドで実施します。
+The "monkey tests" defined in the project issues are exploratory black-box tests that try unexpected inputs, timings and combinations based on the design documents (the architecture and state machine docs under `docs/`). In this repository `e2e-test/monkey-tests.ps1` (Tests 4-11) is that suite, run in the same way and with the same commands as the E2E tests above.
 
-新しい異常系シナリオ (例: 新しい状態遷移、新しい設定オプションの組み合わせ) を
-追加実装した場合は、`monkey-tests.ps1` に対応するテストケースを追加してください。
+When you add a new abnormal-case scenario (for example a new state transition or a new combination of config options), add a matching test case to `monkey-tests.ps1`.
 
-### 手動で確認すべき追加シナリオ (自動化が困難なもの)
+### Additional scenarios to check manually (hard to automate)
 
-以下は実 RTSP サーバーの認証設定や、Spout 送出側で解像度を自由に変更できる
-特殊なツールを要するため、現時点では自動 E2E では網羅できない項目です。
-改修内容が以下に関係する場合は、手動でも動作確認してください。
+The following need things such as RTSP server authentication settings or special tools that change the Spout sender's resolution freely, so the automated E2E tests do not cover them. Check them manually when your change relates to them.
 
-- RTSP サーバー側で認証 (ユーザー名/パスワード) を要求する構成での接続・再接続
-- RTSP サーバー側のタイムアウト設定変更時の挙動 (`connect_timeout_ms`/`send_timeout_ms` の境界値)
-- RTSP サーバー側でのコーデック切替 (例: サーバー再起動で受理コーデックが変わる場合) 時の再接続
-- 極端な解像度 (非常に小さい/大きい解像度、例: 64x64、3840x2160 超) の Spout ソース
-- **GPU モード (`h264_nvenc` + `prefer_dx11: true`) での初回接続成功確認**:
-  実 GPU 環境で `spout-relay.exe` を起動し、既に稼働中の Spout 送信元に接続した際に
-  `logs/*.jsonl` に `SPOUT_RECEIVE_FAILED` が記録されず、直接 `CONNECTING_OUTPUT →
-  STREAMING` へ遷移すること (`ReceiveTexture()` 無引数版の初回接続タイミングずれに
-  起因する黒画面を修正した変更の確認)
+- Connecting and reconnecting with an RTSP server that requires authentication (user name/password)
+- Behaviour when RTSP server timeout settings change (boundary values of `connect_timeout_ms` / `send_timeout_ms`)
+- Reconnection when the codec accepted by the RTSP server changes (for example after a server restart)
+- Spout sources with extreme resolutions (very small or large, for example 64x64 or above 3840x2160)
+- **First-connection check in GPU mode (`h264_nvenc`)**: on a real GPU machine, start `spout-relay.exe` against an already running Spout sender and confirm that `SPOUT_RECEIVE_FAILED` is not recorded in `logs/*.jsonl` and the state goes directly `CONNECTING_OUTPUT → STREAMING` (this verifies the fix for the black frames caused by the first-connection timing of the argument-less `ReceiveTexture()`)
 
-これらは実 RTSP サーバーの設定変更や特殊な Spout 送出元が必要になるため、
-対応する `e2e-test/config/` 設定ファイルを用意した上で `spout-relay.exe` を
-手動起動し、`state/health.json` / `state/metrics.json` および `logs/*.jsonl`
-を確認してください。
+Prepare the matching config files under `e2e-test/config/`, start `spout-relay.exe` manually, and check `state/health.json`, `state/metrics.json` and `logs/*.jsonl`.
 
-> **Note**: `h264_mf` 直接指定、極端なビットレート、`max_b_frames`、
-> `prefer_dx11: false`、極端な FPS は `e2e-test/encoder-config-tests.ps1` で
-> 自動検証されます。
+> **Note**: `h264_mf` set directly, extreme bitrates, `max_b_frames`, `prefer_dx11: false` and extreme FPS values are verified automatically by `e2e-test/encoder-config-tests.ps1`.
 
-- **`spout.stalled_recovery_max_attempts` ウォッチドッグの発動確認**:
-  RTSP のみの再接続では回復しない STALLED ループを人工的に発生させることが難しいため、
-  現時点では自動 E2E で網羅できていません。改修時は `stalled_recovery_max_attempts` を
-  小さい値 (例: `2`) に設定した上で、意図的に `SpoutMonitor` 側の再接続を失敗させる
-  デバッグビルド等で `stalled_recovery_forced` ログが記録され `PROBING` へ遷移することを
-  手動で確認してください。
+- **Triggering the `spout.stalled_recovery_max_attempts` watchdog**: a STALLED loop that RTSP-only reconnects cannot fix is hard to produce artificially, so it is not covered by automated E2E. When changing this logic, set `stalled_recovery_max_attempts` to a small value (for example `2`), make the `SpoutMonitor` reconnect fail on purpose (for example with a debug build), and confirm manually that a `stalled_recovery_forced` log is recorded and the state goes to `PROBING`.
 
 ---
 
-## 長時間耐久・ネットワーク異常試験 (手動手順)
+## Long-running and network-fault tests (manual procedures)
 
-以下は実行に長時間を要する、またはネットワーク環境の操作が必要なため、
-CI / 通常の E2E テストには組み込まず、必要に応じて手動で実施する手順として
-ここに記載します。エンコーダー・フレームパイプライン・RTSP 再接続ロジック・
-メトリクス収集処理に大きな変更を加えた場合は、リリース前に実施してください。
+These take a long time or require manipulating the network, so they are not part of CI or the regular E2E tests; run them manually when needed. Run them before a release when you have made large changes to the encoder, frame pipeline, RTSP reconnect logic or metrics collection.
 
-### 長時間耐久試験 (メモリ/リソースリーク確認)
+### Long-running endurance test (leak check)
 
-**目的**: 長時間 (数時間〜24 時間以上) 連続稼働させても、メモリ使用量や
-ハンドル数が単調に増加し続けない (リークしない) こと、ログファイルの
-ローテーションが正しく行われることを確認する。
+**Goal**: confirm that memory usage and handle counts do not keep growing during long continuous operation (several hours to 24 hours or more), and that log rotation works.
 
-**手順**:
+**Steps**:
 
-1. `e2e-test/config/config.json` をベースに、ログローテーションが発生しやすいよう
-   `app.log_dir` を指定した設定で `spout-relay.exe` を起動する
-   (`LogSink` は 10MB/5 ファイルでローテーションするため、長時間稼働で
-   実際にローテーションが発生することを確認できる)。
-2. 実 Spout ソース (または `spout_test_sender.exe`) を接続し続け、
-   RTSP クライアント (ffmpeg/VLC 等) で継続的に再生する。
-3. 一定間隔 (例: 30 分おき) で以下を記録する:
+1. Based on `e2e-test/config/config.json`, start `spout-relay.exe` with `app.log_dir` set. (`LogSink` rotates at 10 MB with 5 files, so rotation actually happens during a long run.)
+2. Keep a real Spout source (or `spout_test_sender.exe`) connected and keep playing the stream in an RTSP client (ffmpeg, VLC, etc.).
+3. At regular intervals (for example every 30 minutes) record:
    - `Get-Process spout-relay | Select WorkingSet, PrivateMemorySize, HandleCount`
-   - `state/metrics.json` の `frames_received` / `frames_encoded` / `frames_dropped` /
-     `rtsp_errors` / `reconnect_attempts` / `uptime_ms`
-   - `logs/*.jsonl` のファイルサイズ・ローテーションされたファイル (`*.1`, `*.2`...) の有無
-4. 数時間〜24 時間後、以下を確認する:
-   - `WorkingSet` / `PrivateMemorySize` / `HandleCount` が単調増加し続けていないこと
-     (多少の増加後、一定値に収束していること)
-   - `frames_dropped` が継続的に増加し続けていないこと (フレームキューが
-     正常に消費されていること)
-   - ログファイルが `LogSink` の設定 (10MB/5 ファイル) どおりローテーションされ、
-     ディスク使用量が無制限に増加していないこと
-   - RTSP ストリームが途切れず再生できること
+   - `frames_received` / `frames_encoded` / `frames_dropped` / `rtsp_errors` / `reconnect_attempts` / `uptime_ms` in `state/metrics.json`
+   - The size of `logs/*.jsonl` and the presence of rotated files (`*.1`, `*.2`, ...)
+4. After several hours to 24 hours, confirm:
+   - `WorkingSet` / `PrivateMemorySize` / `HandleCount` do not keep growing monotonically (they settle to a constant after some growth)
+   - `frames_dropped` does not keep growing (the frame queue is being consumed)
+   - Log files rotate as `LogSink` is configured (10 MB, 5 files) and disk usage is not growing without bound
+   - The RTSP stream plays without interruption
 
-### ネットワーク異常 (パケットロス・帯域制限) 試験
+### Network faults (packet loss and bandwidth limits)
 
-**目的**: RTSP 送信経路でパケットロスや帯域制限が発生した場合に、
-`RtspPublisherClient` の再接続ロジック (`reconnect_delay_ms` /
-`reconnect_max_delay_ms` / `reconnect_backoff_multiplier` /
-`max_reconnect_attempts`) が期待どおり動作し、ネットワークが復旧した際に
-ストリームが正常に再開することを確認する。
+**Goal**: confirm that the reconnect logic of `RtspPublisherClient` (`reconnect_delay_ms` / `reconnect_max_delay_ms` / `reconnect_backoff_multiplier` / `max_reconnect_attempts`) behaves as expected under packet loss or bandwidth limits on the RTSP path, and that the stream resumes when the network recovers.
 
-**手順**:
+**Steps**:
 
-1. Windows 上でパケットロス・帯域制限をシミュレートするツール
-   (例: [clumsy](https://jagt.github.io/clumsy/)、`netsh interface tc` 相当の
-   サードパーティツール、または WSL 上の `tc`/`netem`) を用意する。
-2. `spout-relay.exe` と mediamtx を起動し、STREAMING (`publish_started`) に
-   到達することを確認する。
-3. RTSP サーバーへの通信経路に対して、以下のような条件を順に適用し、
-   それぞれ `logs/*.jsonl` と `state/metrics.json` を観察する:
-   - **軽度のパケットロス (5-10%)**: `rtsp_errors` が増加するが、ストリームが
-     継続するか、短時間の再接続で復帰すること
-   - **重度のパケットロス (30-50%)**: `state_changed` イベントで
-     `STREAMING → RECONNECTING_OUTPUT` への遷移が記録され、
-     `reconnect_attempts` が増加すること
-   - **帯域制限 (設定ビットレートを下回る帯域)**: エンコーダーがエラーを
-     出さずに動作を継続するか、`rtsp_errors`/再接続イベントが記録されること
-   - **完全な遮断 → 復旧**: 通信を完全に遮断し、`max_reconnect_attempts` に
-     達する前に復旧させた場合は `RECONNECTING_OUTPUT → STREAMING` に復帰すること。
-     `max_reconnect_attempts` を超えるまで遮断を継続した場合は `FATAL` に
-     遷移し、プロセスが終了すること (`e2e-test/monkey-tests.ps1` Test 11 と
-     同様の確認)
-4. 各条件適用後、ネットワーク条件を正常に戻し、ストリームが正常に
-   再生できる状態に復帰することを確認する。
+1. Prepare a tool that simulates packet loss and bandwidth limits on Windows (for example [clumsy](https://jagt.github.io/clumsy/), a third-party tool equivalent to `netsh interface tc`, or `tc`/`netem` on WSL).
+2. Start `spout-relay.exe` and mediamtx, and confirm that STREAMING (`publish_started`) is reached.
+3. Apply the following conditions to the path to the RTSP server one after another, observing `logs/*.jsonl` and `state/metrics.json` each time:
+   - **Mild packet loss (5-10%)**: `rtsp_errors` increases, but the stream continues or recovers after a short reconnect
+   - **Heavy packet loss (30-50%)**: a `STREAMING → RECONNECTING_OUTPUT` `state_changed` event is recorded and `reconnect_attempts` increases
+   - **Bandwidth limit (below the configured bitrate)**: the encoder keeps running without errors, or `rtsp_errors` / reconnect events are recorded
+   - **Complete outage then recovery**: if the network is restored before `max_reconnect_attempts` is reached, the state returns `RECONNECTING_OUTPUT → STREAMING`. If the outage lasts beyond `max_reconnect_attempts`, the state becomes `FATAL` and the process exits (the same check as Test 11 in `e2e-test/monkey-tests.ps1`)
+4. After each condition, restore the network and confirm that the stream plays normally again.
 
 ---
 
-## ユーザーテスト
+## User tests
 
-最終確認として、実際の Spout ソース (OBS, Resolume 等) と実 RTSP サーバーを用いて
-動作確認を行います。
+As a final check, run against a real Spout source (OBS, Resolume, etc.) and a real RTSP server.
 
-### 手順
+### Steps
 
-1. 実機の Spout 送出元アプリケーションを起動し、SpoutRelay の `config.json` で
-   対象の `sender_name` を指定します。
-2. RTSP サーバー (mediamtx 等) を `rtsp://192.168.0.100:8554/spout-test` で
-   配信可能な状態にしておきます。
-3. `spout-relay.exe -c config.json` を起動します。
-4. VLC 等の RTSP クライアントで `rtsp://192.168.0.100:8554/spout-test` に接続し、
-   映像が正しく表示されることを確認します。
-5. Spout 送出元を停止/再開し、NO SIGNAL プレースホルダ表示 (有効な場合) や
-   再接続時の挙動を確認します。
-6. `state/health.json` / `state/metrics.json` / `logs/*.jsonl` を確認し、
-   期待される状態・メトリクスが記録されていることを確認します。
+1. Start the Spout sending application and set the target `sender_name` in SpoutRelay's `config.json`.
+2. Make the RTSP server (mediamtx etc.) ready to accept a stream at `rtsp://192.168.0.100:8554/spout-test` (use your own server address).
+3. Start `spout-relay.exe -c config.json`.
+4. Connect to `rtsp://192.168.0.100:8554/spout-test` with an RTSP client such as VLC and confirm that the video displays correctly.
+5. Stop and restart the Spout sender, and check the NO SIGNAL placeholder (if enabled) and the reconnect behaviour.
+6. Check `state/health.json`, `state/metrics.json` and `logs/*.jsonl` for the expected state and metrics.
 
 ---
 
-## 実装後のテストチェックリスト
+## Post-implementation checklist
 
-何らかの実装・改修を行った場合は、以下のチェックリストに従って
-影響範囲に応じたテストを実施してください。
+After any implementation or change, run the tests that match the affected area.
 
-- [ ] **ユニットテスト**: `build/tests/publisher_tests.exe` を実行し、`All tests passed.`
-      が表示されること。ロジックを追加・変更した場合は対応するテストケースを追加していること。
-- [ ] **E2E テスト**: ステートマシン・RTSP 配信・エンコーダーに関わる変更を行った場合、
-      `pwsh e2e-test/run-tests.ps1` および `pwsh e2e-test/monkey-tests.ps1` を実行し、
-      すべて `[PASS]` であること。
-- [ ] **モンキーテスト**: 新しい異常系シナリオ・設定オプションを追加した場合、
-      `monkey-tests.ps1` に対応するテストケースを追加し、実行結果が `[PASS]` であること。
-- [ ] **ユーザーテスト**: 本番相当の挙動に影響する変更 (配信プロトコル、エンコード設定、
-      Spout 接続処理など) を行った場合、実機の Spout ソース・RTSP サーバーで最終確認を行うこと。
+- [ ] **Unit tests**: run `build/tests/publisher_tests.exe` and confirm `All tests passed.` is printed. If you added or changed logic, add the matching test cases.
+- [ ] **E2E tests**: for changes to the state machine, RTSP publishing or the encoder, run `pwsh e2e-test/run-tests.ps1` and `pwsh e2e-test/monkey-tests.ps1` and confirm everything is `[PASS]`.
+- [ ] **Monkey tests**: if you added new abnormal-case scenarios or config options, add matching test cases to `monkey-tests.ps1` and confirm they `[PASS]`.
+- [ ] **User tests**: for changes that affect production-like behaviour (publishing protocol, encode settings, Spout connection handling), run a final check with a real Spout source and RTSP server.
 
-すべての項目が完了し、問題が解消されていることを確認した上でコミット・PR 作成に進んでください。
+Commit and open a PR only after all items are done and any problems are resolved.

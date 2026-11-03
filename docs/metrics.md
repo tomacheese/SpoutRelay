@@ -1,35 +1,35 @@
-# メトリクス & ヘルス
+# Metrics & Health
 
-アプリケーションは実行中に 2 種類の JSON ファイルをディスクへ書き出します。書き出し間隔は `runtime.emit_metrics_interval_ms` / `emit_health_interval_ms` で設定します（デフォルト: 各 1 秒）。
+While running, the application writes two JSON files to disk. The write intervals are set by `runtime.emit_metrics_interval_ms` / `runtime.emit_health_interval_ms` (default: 1 second each).
 
-> **ストレージへの書き込み最適化（差分スキップ）**
+> **Write optimisation (unchanged payloads are skipped)**
 >
-> バージョン 1.x 以降、`ts` および `uptime_ms` を除いたペイロードが前回書き込み時と同一である場合、実際のファイル書き込みをスキップします。
+> If the payload excluding `ts` and `uptime_ms` is identical to the previous write, the actual file write is skipped.
 >
-> - **health.json**: `state` が変化しない限りほぼ書き込まれません（STREAMING 継続中など通常運用時はほぼゼロ）。
-> - **metrics.json**: `frames_received` 等のカウンタが増加している間は毎回書き込まれますが、IDLE/STALLED などカウンタが進まない状態では書き込みをスキップします。
+> - **health.json**: rewritten essentially only when `state` / `healthy` changes (practically never during steady `STREAMING`).
+> - **metrics.json**: rewritten on every interval while counters such as `frames_received` increase, but skipped in states where nothing changes, such as `IDLE` or `STALLED`.
 >
-> このため、各ファイルの `ts` フィールドは以下の意味に変わります:
+> As a result, the `ts` field means the following:
 >
-> | ファイル | `ts` の意味 |
-> |---------|------------|
-> | `health.json` | **ヘルス状態（`state`/`healthy`）が最後に変化した時刻** |
-> | `metrics.json` | **フレームカウンタ等のメトリクスが最後に変化した時刻** |
+> | File | Meaning of `ts` |
+> |------|-----------------|
+> | `health.json` | **Time the health state (`state`/`healthy`) last changed** |
+> | `metrics.json` | **Time the metrics (frame counters etc.) last changed** |
 >
-> **死活監視（プロセスが生きているか）への影響**:
-> - STREAMING 中はフレームカウンタが毎秒増加するため、`metrics.json` の `ts` はほぼ毎秒更新されます。
-> - **IDLE / STALLED 中はカウンタも状態も変化しないため、どちらのファイルの `ts` も更新されません。** これらの状態でプロセスの生存確認が必要な場合は、OS のプロセス確認（例: `Get-Process spout-relay`）を使用するか、`emit_metrics_interval_ms` の間隔を短くした上でこの最適化の効果を再検討してください。
+> **Impact on liveness monitoring**:
+> - During `STREAMING` the frame counters increase every second, so `ts` in `metrics.json` is updated roughly every second.
+> - **During `IDLE` / `STALLED`, neither counters nor state change, so `ts` is not updated in either file.** To check that the process is alive in those states, use an OS-level process check (for example `Get-Process spout-relay`) instead of relying on `ts`.
 
-> **emit interval とストレージ書き込み頻度**
+> **Emit interval and storage write frequency**
 >
-> デフォルトの 1 秒間隔（`emit_metrics_interval_ms = 1000`）は汎用的な設定ですが、環境に合わせて調整できます。
-> - **短くする場合**: 監視の応答性は上がりますが、状態変化やカウンタ変化が頻繁な期間の書き込み回数が増加します。
-> - **長くする場合**: 書き込み頻度を減らせます。監視ツール側のポーリング間隔に合わせるのが合理的です（例: 5000 ～ 10000 ms）。
-> - SD カード・eMMC・ネットワーク共有などの低速・低耐久メディアを使用する場合は、間隔を長くするか、以下の RAM ディスク運用を検討してください。
+> The default 1-second interval (`emit_metrics_interval_ms = 1000`) is a general-purpose setting and can be tuned.
+> - **Shorter**: better monitoring responsiveness, but more writes while the state or counters change frequently.
+> - **Longer**: fewer writes. Matching the polling interval of the monitoring tool is reasonable (for example 5000 to 10000 ms).
+> - On slow or low-endurance media such as SD cards, eMMC or network shares, lengthen the interval or consider the RAM disk setup below.
 
-> **RAM ディスク（tmpfs）への書き出し**
+> **Writing to a RAM disk (tmpfs)**
 >
-> ストレージ寿命が懸念される環境（組み込み機器・SD カードブートなど）では、`metrics_path` / `health_path` を RAM ディスク上のパスに設定することでディスクへの書き込みをゼロにできます。
+> Where storage lifetime is a concern (embedded devices, SD-card boot, etc.), point `metrics_path` / `health_path` at a RAM disk to eliminate disk writes.
 >
 > ```jsonc
 > // config.json
@@ -41,13 +41,15 @@
 > }
 > ```
 >
-> Windows の RAM ディスクドライブ（例: `R:\`）には [ImDisk](https://sourceforge.net/projects/imdisk-toolkit/) などのツールを使用できます。プロセス終了後にファイルは消えますが、外部監視ツールからはリアルタイムで参照可能です。
+> On Windows, tools such as [ImDisk](https://sourceforge.net/projects/imdisk-toolkit/) can provide a RAM disk drive (for example `R:\`). The files disappear when the machine restarts, but external monitoring tools can still read them in real time.
+
+Both files are written atomically (a temporary file is replaced over the target), so readers never see a half-written file. If a write fails, the previous file is kept and a `STATE_FILE_WRITE_FAILED` error is logged.
 
 ## health.json
 
-アプリの現在の状態と基本情報を表します。外部の死活監視ツールや Docker ヘルスチェックに利用できます。
+Represents the current state of the app. It can be used by external liveness monitors or Docker health checks.
 
-### フォーマット
+### Format
 
 ```json
 {
@@ -57,30 +59,30 @@
 }
 ```
 
-### フィールド説明
+### Fields
 
-| フィールド | 型 | 説明 |
-|----------|----|------|
-| `healthy` | bool | `true`: 正常状態（IDLE/PROBING/PLACEHOLDER/CONNECTING_OUTPUT/STREAMING）、`false`: それ以外 |
-| `state` | string | 現在のステートマシン状態名 |
-| `ts` | string | ヘルス状態（`state` / `healthy`）が**最後に変化した**時刻（ISO 8601 UTC）。差分スキップにより、状態が安定している間は更新されません。 |
+| Field | Type | Description |
+|-------|------|-------------|
+| `healthy` | bool | `true` in a normal state (IDLE/PROBING/PLACEHOLDER/CONNECTING_OUTPUT/STREAMING), `false` otherwise |
+| `state` | string | Current state machine state name |
+| `ts` | string | Time (ISO 8601 UTC) at which the health state (`state` / `healthy`) **last changed**. Not updated while the state is stable |
 
-### `healthy` の判定ロジック
+### How `healthy` is determined
 
-| 状態 | healthy |
-|------|---------|
+| State | healthy |
+|-------|---------|
 | `IDLE`, `PROBING`, `PLACEHOLDER`, `CONNECTING_OUTPUT`, `STREAMING` | `true` |
-| `STALLED`, `RECONNECTING_OUTPUT`, `RECONFIGURING`, `FATAL`, その他 | `false` |
+| `STALLED`, `RECONNECTING_OUTPUT`, `RECONFIGURING`, `RECOVERING_DEVICE`, `STOPPING`, `FATAL` | `false` |
 
-`PLACEHOLDER` は `placeholder.enabled=true` の場合に、NO SIGNAL 映像を RTSP へ継続配信している正常な状態であるため `healthy: true` となります。
+`PLACEHOLDER` (with `placeholder.enabled=true`) is healthy because the NO SIGNAL video is being published to RTSP continuously.
 
 ---
 
 ## metrics.json
 
-配信パフォーマンスの詳細なカウンターを含みます。
+Contains detailed counters about publishing performance.
 
-### フォーマット
+### Format
 
 ```json
 {
@@ -104,40 +106,42 @@
 }
 ```
 
-### フィールド説明
+### Fields
 
-| フィールド | 型 | 説明 |
-|----------|----|------|
-| `state` | string | 現在のステートマシン状態名 |
-| `sender_name` | string | Spout センダー名 |
-| `sender_width` / `sender_height` | int | フレーム解像度（ピクセル） |
-| `sender_fps` | float | センダー側のフレームレート |
-| `bitrate_kbps` | float | 計測ビットレート（kbps） |
-| `current_fps` | float | エンコーダーの実効フレームレート |
-| `rtsp_url` | string | 設定された RTSP URL |
-| `encoder_codec` | string | 使用中のコーデック（`h264_nvenc` 等） |
-| `uptime_ms` | int | セッション開始からの経過ミリ秒数 |
-| `frames_received` | int | Spout から受信したフレーム総数 |
-| `frames_encoded` | int | エンコード完了フレーム総数 |
-| `frames_dropped` | int | エンコード失敗でドロップしたフレーム数 |
-| `rtsp_errors` | int | RTSP 送信エラーの累計数 |
-| `reconnect_attempts` | int | RTSP 再接続試行の累計数 |
-| `device_lost_recoveries` | int | GPU TDR デバイスロストから自動回復した累計回数 |
-| `ts` | string | このメトリクスが**最後に変化した**時刻（ISO 8601 UTC）。差分スキップにより、フレームカウンタ等が変化しない間（IDLE/STALLED 等）は更新されません。 |
+| Field | Type | Description |
+|-------|------|-------------|
+| `state` | string | Current state machine state name |
+| `sender_name` | string | Spout sender name |
+| `sender_width` / `sender_height` | int | Frame resolution (pixels) |
+| `sender_fps` | float | Frame rate reported by the sender |
+| `bitrate_kbps` | float | Measured bitrate (kbps) |
+| `current_fps` | float | Effective encoder frame rate |
+| `rtsp_url` | string | Configured RTSP URL |
+| `encoder_codec` | string | Codec in use (`h264_nvenc`, etc.) |
+| `uptime_ms` | int | Milliseconds since the session started |
+| `frames_received` | int | Total frames received from Spout |
+| `frames_encoded` | int | Total frames encoded |
+| `frames_dropped` | int | Frames dropped because of encode failures |
+| `rtsp_errors` | int | Cumulative RTSP send errors |
+| `reconnect_attempts` | int | Cumulative RTSP reconnect attempts |
+| `device_lost_recoveries` | int | Cumulative automatic recoveries from GPU TDR device loss |
+| `ts` | string | Time (ISO 8601 UTC) at which these metrics **last changed**. Not updated while nothing changes (`IDLE`/`STALLED`, etc.) |
 
 ---
 
-## イベントログ (JSON Lines)
+## Event log (JSON Lines)
 
-`app.log_dir` に指定したディレクトリへ JSON Lines 形式でログが書き出されます。
+Logs are written in JSON Lines format to the directory given by `app.log_dir`.
 
-### ファイル名
+### File name
 
 ```text
 logs/<instance_name>.jsonl
 ```
 
-### イベント種別
+The file rotates at 10 MB, keeping 5 files.
+
+### Event types
 
 #### state_changed
 
@@ -175,29 +179,33 @@ logs/<instance_name>.jsonl
 {"ts":"2026-04-09T22:05:44.707Z","event":"error","code":"SPOUT_RECEIVE_FAILED","message":"Timeout waiting for first frame"}
 ```
 
-### エラーコード一覧
+#### Other events
 
-> **注意**: 設定ファイルエラー（`CONFIG_NOT_FOUND` / `CONFIG_PARSE_ERROR` / `CONFIG_VALIDATION_ERROR`）は起動時に標準エラー出力へのみ出力されます。アプリケーションが起動できなかった場合はイベントログに記録されません。
+`publish_stopped`, `reconnecting`, `stall_recovered`, `sender_disappeared`, `source_disconnected_detected`, `stalled_recovery_forced`, `gpu_device_lost`, `gpu_device_reinit_ok`, `gpu_zero_copy_enabled` / `gpu_zero_copy_disabled`, `placeholder_started`, `placeholder_source_found`, `placeholder_seamless`, `source_seamless_start`, `placeholder_render_failed`, `prefer_dx11_ignored`, `state_file_write_recovered`, `stopped` and `fatal_exit` are also emitted. See `src/app/supervisor.cpp` for when each occurs.
 
-| コード | 説明 |
-|--------|------|
-| `SPOUT_INIT_FAILED` | SpoutDX の初期化失敗 |
-| `SPOUT_CONNECT_FAILED` | Spout センダーへの接続失敗 |
-| `SPOUT_RECEIVE_FAILED` | フレーム受信タイムアウト |
-| `SPOUT_REINIT_FAILED` | GPU TDR 後のデバイス再作成失敗 |
-| `ENCODER_INIT_FAILED` | エンコーダー初期化失敗（全コーデック試行後） |
-| `ENCODER_ENCODE_FAILED` | エンコード中のエラー |
-| `RTSP_CONNECT_FAILED` | RTSP サーバーへの接続失敗 |
-| `RTSP_SEND_FAILED` | RTP パケット送信エラー |
-| `RTSP_TIMEOUT` | RTSP 送信タイムアウト |
-| `STATE_FILE_WRITE_FAILED` | `metrics.json` / `health.json` の書き込み失敗（旧ファイルは保持される。`target` / `path` を付与し、失敗開始時と原因が変わったときのみ記録） |
-| `FATAL_ERROR` | 回復不能なエラー |
+### Error codes
+
+> **Note**: Configuration errors are printed to standard error only, as `[ERROR] <message>`, and the process exits with code 1. They are not recorded in the event log because logging has not been initialised yet.
+
+| Code | Description |
+|------|-------------|
+| `SPOUT_INIT_FAILED` | SpoutDX initialisation failed |
+| `SPOUT_CONNECT_FAILED` | Connecting to the Spout sender failed |
+| `SPOUT_RECONNECT_FAILED` | Re-connecting the Spout receiver after the GPU/CPU receive path was decided failed |
+| `SPOUT_RECEIVE_FAILED` | Timed out waiting for the first frame |
+| `SPOUT_REINIT_FAILED` | Device recreation after a GPU TDR failed |
+| `ENCODER_INIT_FAILED` | Encoder initialisation failed (after trying all codecs) |
+| `ENCODER_ENCODE_FAILED` | Error during encoding |
+| `RTSP_CONNECT_FAILED` | Connecting to the RTSP server failed |
+| `RTSP_SEND_FAILED` | RTP packet send error |
+| `RTSP_TIMEOUT` | Maximum reconnect attempts exceeded |
+| `STATE_FILE_WRITE_FAILED` | Writing `metrics.json` / `health.json` failed (the old file is kept; `target` / `path` are attached; logged only when the failure starts or its cause changes) |
 
 ---
 
-## メトリクスの活用例
+## Usage examples
 
-### シェルスクリプトによるヘルスチェック
+### Health check with PowerShell
 
 ```powershell
 $health = Get-Content state\health.json | ConvertFrom-Json
@@ -206,7 +214,7 @@ if (-not $health.healthy) {
 }
 ```
 
-### フレームドロップ率の確認
+### Checking the frame drop rate
 
 ```powershell
 $m = Get-Content state\metrics.json | ConvertFrom-Json

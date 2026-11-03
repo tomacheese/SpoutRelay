@@ -138,13 +138,13 @@ void Supervisor::handle_probing() {
                         {{"name", config_.spout.sender_name}});
     }
 
-    // ソースが見つからない間、プレースホルダ (NO SIGNAL) 映像の配信が
-    // 有効であれば PLACEHOLDER 状態へ遷移する。
+    // While no source is found, transition to PLACEHOLDER if streaming the
+    // placeholder (NO SIGNAL) video is enabled.
     if (config_.placeholder.enabled) {
-        // フリッカー対策: PLACEHOLDER を抜けた直後（CONNECTING_OUTPUT が
-        // 初回フレーム待ちでタイムアウトし PROBING に戻ってきた場合等）は、
-        // reconnect_delay_ms の間 PLACEHOLDER への再突入を抑制し、
-        // エンコーダー/RTSP の再初期化が高頻度に繰り返されることを防ぐ。
+        // Anti-flicker: right after leaving PLACEHOLDER (e.g. CONNECTING_OUTPUT timed
+        // out waiting for the first frame and returned to PROBING), suppress re-entering
+        // PLACEHOLDER for reconnect_delay_ms so the encoder/RTSP are not
+        // re-initialized at a high rate.
         if (placeholder_cooldown_active_ &&
             !placeholder_cooldown_timer_.expired(config_.rtsp.reconnect_delay_ms)) {
             std::this_thread::sleep_for(
@@ -168,18 +168,18 @@ void Supervisor::handle_placeholder() {
     }
 
     if (!placeholder_active_) {
-        // 直近に接続した実ソースの解像度が分かっていれば優先する。
-        // ソースが同解像度で復帰した際の RTSP 再構成を避けられる。
+        // Prefer the resolution of the most recently connected real source, if known.
+        // This avoids an RTSP reconfiguration when the source returns at the same resolution.
         uint32_t w = last_source_width_  ? last_source_width_  : static_cast<uint32_t>(config_.placeholder.width);
         uint32_t h = last_source_height_ ? last_source_height_ : static_cast<uint32_t>(config_.placeholder.height);
 
         placeholder_frame_ = render_placeholder_frame(config_.placeholder, config_.spout.sender_name, w, h);
 
-        // 描画結果を検証する。
-        // render_placeholder_frame() は解像度が 0x0 や上限超過の場合に
-        // data が空・width/height = 0 の FrameBuffer を返す。
-        // メタ情報とバッファ実体が不整合なままエンコーダに渡すとクラッシュするため、
-        // 異常時は PLACEHOLDER 状態のまま次回ループでリトライする。
+        // Validate the rendered result.
+        // render_placeholder_frame() returns a FrameBuffer with empty data and
+        // width/height = 0 if the resolution is 0x0 or over the limit.
+        // Passing metadata inconsistent with the buffer to the encoder would crash,
+        // so on failure stay in PLACEHOLDER and retry on the next loop.
         if (placeholder_frame_.data.empty() ||
             placeholder_frame_.width != w || placeholder_frame_.height != h) {
             log_->log_event(spdlog::level::err, "placeholder_render_failed",
@@ -194,9 +194,9 @@ void Supervisor::handle_placeholder() {
         placeholder_meta_.height = h;
         placeholder_content_changed_ = true;
 
-        // シームレス移行可能か判定:
-        // seamless_handoff_ が true かつ encoder_/RTSP が生存しており解像度も一致
-        // していれば、teardown/reinit をスキップして RTSP セッションを維持する。
+        // Decide whether a seamless handoff is possible:
+        // if seamless_handoff_ is true, encoder_/RTSP are alive and the resolution
+        // matches, skip teardown/reinit and keep the RTSP session.
         bool can_seamless = supervisor_logic::can_seamless_handoff(
             seamless_handoff_,
             static_cast<bool>(encoder_),
@@ -205,8 +205,8 @@ void Supervisor::handle_placeholder() {
         seamless_handoff_ = false;
 
         if (can_seamless) {
-            // プレースホルダの先頭フレームを IDR として送出し、
-            // 視聴者が再生を継続できるようにする。
+            // Send the first placeholder frame as an IDR so viewers
+            // can keep playing.
             encoder_->request_next_idr();
             log_->log_event(spdlog::level::info, "placeholder_seamless",
                             {{"name",   config_.spout.sender_name},
@@ -217,7 +217,7 @@ void Supervisor::handle_placeholder() {
             if (!init_encoder_and_rtsp(w, h, init_err)) {
                 teardown_rtsp();
                 teardown_encoder();
-                // PLACEHOLDER のまま次回リトライする
+                // Stay in PLACEHOLDER and retry next time
                 std::this_thread::sleep_for(
                     std::chrono::milliseconds(config_.rtsp.reconnect_delay_ms));
                 return;
@@ -239,7 +239,7 @@ void Supervisor::handle_placeholder() {
         placeholder_metrics_sw_.reset();
     }
 
-    // 実ソースが復帰したか poll_interval_ms ごとに確認する
+    // Check every poll_interval_ms whether the real source has returned
     if (placeholder_probe_timer_.expired(config_.spout.poll_interval_ms)) {
         placeholder_probe_timer_.reset();
         if (spout_monitor_->probe_sender(config_.spout.sender_name)) {
@@ -247,9 +247,9 @@ void Supervisor::handle_placeholder() {
             if (spout_monitor_->connect(config_.spout.sender_name, connect_err)) {
                 log_->log_event(spdlog::level::info, "placeholder_source_found",
                                 {{"name", config_.spout.sender_name}});
-                // シームレス移行: encoder_+RTSP が生存していれば維持したまま
-                // CONNECTING_OUTPUT へ遷移する。解像度チェックは最初のフレームを
-                // 受け取ってから行う (handle_connecting_output)。
+                // Seamless handoff: if encoder_+RTSP are alive, keep them and move to
+                // CONNECTING_OUTPUT. The resolution check happens after the first frame
+                // is received (handle_connecting_output).
                 if (encoder_ && rtsp_client_ && rtsp_client_->is_connected()) {
                     seamless_handoff_ = true;
                 } else {
@@ -257,9 +257,9 @@ void Supervisor::handle_placeholder() {
                     teardown_encoder();
                 }
                 placeholder_active_ = false;
-                // PLACEHOLDER を抜けた直後の再突入をクールダウンするためのタイマーを開始する。
-                // CONNECTING_OUTPUT が初回フレーム待ちでタイムアウトし PROBING 経由で
-                // 戻ってきた場合でも、reconnect_delay_ms の間は再初期化を抑制する。
+                // Start the timer that rate-limits re-entering PLACEHOLDER right after leaving it.
+                // Even if CONNECTING_OUTPUT times out waiting for the first frame and returns
+                // via PROBING, re-initialization is suppressed for reconnect_delay_ms.
                 placeholder_cooldown_timer_.reset();
                 placeholder_cooldown_active_ = true;
                 state_machine_.transition_to(PublisherState::CONNECTING_OUTPUT);
@@ -269,18 +269,18 @@ void Supervisor::handle_placeholder() {
         }
     }
 
-    // 設定 fps に基づいてプレースホルダフレームを再エンコード・送出する
+    // Re-encode and send the placeholder frame at the configured fps
     const int64_t frame_interval_us = 1'000'000LL / config_.encoder.fps;
     if (placeholder_frame_timer_.elapsed_us() < frame_interval_us) {
-        // 送信間隔未満の場合は何もせず return する。
-        // run() ループ末尾の固定 sleep により次回呼び出しまでの間隔が確保されるため、
-        // ここで追加の sleep を行うと sleep が積み重なり実効 fps が低下してしまう。
+        // If the send interval has not elapsed, do nothing and return.
+        // The fixed sleep at the end of the run() loop already spaces calls, so an
+        // extra sleep here would accumulate and lower the effective fps.
         return;
     }
     placeholder_frame_timer_.reset();
     placeholder_meta_.timestamp_us = time_utils::now_us();
 
-    // 静止画のため 2 回目以降は content_changed=false で sws_scale をスキップする
+    // Still image: from the second time on, skip sws_scale with content_changed=false
     std::vector<EncodedPacket> packets;
     if (!encoder_->encode(placeholder_frame_, placeholder_meta_, packets, placeholder_content_changed_)) {
         log_->log_error("ENCODER_ENCODE_FAILED", "placeholder encode() returned false");
@@ -298,7 +298,7 @@ void Supervisor::handle_placeholder() {
             teardown_rtsp();
             teardown_encoder();
             placeholder_active_ = false;
-            // メトリクスをリセットして次回の encode_publish_thread_func と混在しないようにする
+            // Reset metrics so they do not mix with the next encode_publish_thread_func
             placeholder_frames_since_last_ = 0;
             placeholder_bytes_since_last_  = 0;
             placeholder_metrics_sw_.reset();
@@ -312,7 +312,7 @@ void Supervisor::handle_placeholder() {
         metrics_->increment_frames_encoded();
         placeholder_frames_since_last_++;
 
-        // 1 秒ごとに fps / bitrate_kbps を更新する（encode_publish_thread_func と同じ方式）
+        // Update fps / bitrate_kbps once per second (same as encode_publish_thread_func)
         int64_t elapsed_ms = placeholder_metrics_sw_.elapsed_ms();
         if (elapsed_ms >= 1000) {
             double fps  = placeholder_frames_since_last_ * 1000.0 / elapsed_ms;
@@ -363,24 +363,24 @@ void Supervisor::handle_connecting_output() {
         return;
     }
 
-    // 最初のフレームをエンコードスレッドの初期フリーズフレームとして保存する。
-    // Spout 送信側が静止画面のまま SendImage() を止めると FramePump はフレームを
-    // キューに積まない。encode_publish_thread_func() がこの保存フレームで起動
-    // することで、送信側が静止していても直ちに映像を送れるようになる。
+    // Save the first frame as the encode thread's initial freeze frame.
+    // If the Spout sender stops calling SendImage() on a static scene, FramePump does
+    // not queue frames. Starting encode_publish_thread_func() with this saved frame
+    // lets video go out immediately even when the sender is static.
     initial_frame_buf_  = std::move(buf);
     initial_frame_meta_ = meta;
 
     uint32_t source_w = meta.width;
     uint32_t source_h = meta.height;
 
-    // 直近に接続した実ソースの解像度を記録する。PLACEHOLDER 状態で
-    // この解像度を優先することで、ソース復帰時の RTSP 再構成を避ける。
+    // Record the resolution of the most recently connected real source. Preferring it
+    // in PLACEHOLDER avoids an RTSP reconfiguration when the source returns.
     last_source_width_  = source_w;
     last_source_height_ = source_h;
 
-    // シームレス移行可能か判定:
-    // seamless_handoff_ が true かつ encoder_/RTSP が生存しており解像度も一致
-    // していれば、teardown/reinit をスキップして RTSP セッションを維持する。
+    // Decide whether a seamless handoff is possible:
+    // if seamless_handoff_ is true, encoder_/RTSP are alive and the resolution
+    // matches, skip teardown/reinit and keep the RTSP session.
     bool can_seamless = supervisor_logic::can_seamless_handoff(
         seamless_handoff_,
         static_cast<bool>(encoder_),
@@ -389,8 +389,8 @@ void Supervisor::handle_connecting_output() {
     seamless_handoff_ = false;
 
     if (can_seamless) {
-        // プレースホルダから実ソースへシームレスに切り替える。
-        // IDR フレームを要求して視聴者が再生を継続できるようにする。
+        // Switch seamlessly from the placeholder to the real source.
+        // Request an IDR frame so viewers can keep playing.
         current_width_  = source_w;
         current_height_ = source_h;
         encoder_->request_next_idr();
@@ -399,7 +399,7 @@ void Supervisor::handle_connecting_output() {
                          {"width",  std::to_string(source_w)},
                          {"height", std::to_string(source_h)}});
     } else {
-        // 解像度不一致か初回起動: 既存の encoder_/RTSP があれば解体して再初期化
+        // Resolution mismatch or first start: tear down any existing encoder_/RTSP and re-init
         if (encoder_)      teardown_encoder();
         if (rtsp_client_)  teardown_rtsp();
         current_width_  = source_w;
@@ -416,28 +416,14 @@ void Supervisor::handle_connecting_output() {
             static_cast<int>(current_width_), static_cast<int>(current_height_),
             config_.encoder.fps);
 
-        // init_encoder_and_rtsp() はセンダーの実フォーマットを見て GPU ゼロコピー
-        // パス (ReceiveTexture 無引数) と CPU パス (ReceiveImage) のどちらを使うか
-        // を今まさに (再) 決定した (SpoutMonitor::set_gpu_mode())。
-        // この判定より前に上のフレーム待機ループが receive_latest_frame() を
-        // 呼んでいるが、それは「変更前」の gpu_mode を使っている。
-        // spoutDX 内部の更新イベントフラグ (m_bUpdated) は ReceiveTexture() 無引数版
-        // だと呼び出し側が IsUpdated() を呼ばなくても内部で消費・リセットされる一方、
-        // ReceiveImage() 側は CheckStagingTextures() を m_bUpdated==true の時にしか
-        // 呼ばないため、切り替え前に別パスがこのフラグを消費済みだと、切り替え後の
-        // パスの一度きりの初期化 (CheckTexture()/CheckStagingTextures()) が永久に
-        // 実行されず、以後 receive_latest_frame() が恒久的に失敗し続ける
-        // (センダーは生きているのに STREAMING→STALLED を無限に繰り返すバグ)。
-        // disconnect()+connect() で spoutDX 側を ReleaseReceiver() から作り直し、
-        // 新規接続イベントとして m_bUpdated を確実に立て直すことで、
-        // 最終的に選択された受信パスの初期化を保証する。
+        // The receive path (GPU ReceiveTexture vs CPU ReceiveImage) was just decided by
+        // set_gpu_mode(), after the frame-wait loop had already received with the old mode.
+        // disconnect()+connect() must run here so the chosen path re-initializes; otherwise
+        // the other path may have consumed spoutDX's update flag and receive_latest_frame()
+        // would fail forever (STREAMING -> STALLED loop).
         //
-        // 注意: disconnect() (ReleaseReceiver()) は spoutDX 内部テクスチャを解放するため、
-        // 上の待機ループで取得した initial_frame_buf_ が GPU パスのポインタ
-        // (gpu_texture) を保持している場合、そのポインタは解放後アクセスすると
-        // use-after-free になる。teardown_encoder() が disconnect 前に必ず
-        // set_gpu_mode(false) するのと同じ理由で、ここでも disconnect 後は
-        // 古いセッションのテクスチャポインタを破棄する。
+        // disconnect() frees spoutDX's internal texture, so a GPU-path pointer held in
+        // initial_frame_buf_ would dangle (use-after-free); discard it after disconnect.
         std::string reset_err;
         spout_monitor_->disconnect();
         initial_frame_buf_.gpu_texture = nullptr;
@@ -474,12 +460,12 @@ void Supervisor::handle_streaming() {
         return;
     }
 
-    // encode_error_flag_ より前にデバイスロストを確認する。
-    // TDR 発生時は encode() が false を返して encode_error_flag_ がセットされるが、
-    // デバイスを再作成せずに PROBING → CONNECTING_OUTPUT してもクラッシュが繰り返すため、
-    // RECOVERING_DEVICE 状態を経由してデバイスを再作成してから復帰する。
+    // Check for device loss before encode_error_flag_.
+    // On a TDR, encode() returns false and sets encode_error_flag_, but going
+    // PROBING -> CONNECTING_OUTPUT without recreating the device would crash repeatedly,
+    // so go through RECOVERING_DEVICE to recreate the device first.
     if (spout_monitor_ && spout_monitor_->is_device_removed()) {
-        encode_error_flag_.exchange(false);  // 巻き添えフラグをクリア
+        encode_error_flag_.exchange(false);  // clear the collateral flag
         stop_encode_thread();
         state_machine_.transition_to(PublisherState::RECOVERING_DEVICE);
         return;
@@ -507,10 +493,10 @@ void Supervisor::handle_streaming() {
         return;
     }
 
-    // Spout ソース切断検出。
-    // 静止画面では新規フレームが来ないが ReceiveImage 自体は成功するため
-    // last_source_alive_ms() は更新される。新規フレームが来ない（静止）だけでは
-    // STALLED に遷移せず、ソースが完全に応答しなくなった場合のみ遷移する。
+    // Detect Spout source disconnection.
+    // On a static scene no new frames arrive but ReceiveImage itself succeeds, so
+    // last_source_alive_ms() keeps updating. Lack of new frames (static) alone does
+    // not cause STALLED; only a completely unresponsive source does.
     if (frame_pump_) {
         int64_t elapsed = time_utils::now_ms() - frame_pump_->last_source_alive_ms();
         if (elapsed > config_.spout.frame_timeout_ms) {
@@ -532,8 +518,8 @@ void Supervisor::handle_stalled() {
         return;
     }
 
-    // STALLED 中もデバイスロストを確認する。
-    // TDR が STALLED 中に発生した場合も RECOVERING_DEVICE を経由して回復する。
+    // Also check for device loss while STALLED.
+    // A TDR during STALLED also recovers via RECOVERING_DEVICE.
     if (spout_monitor_ && spout_monitor_->is_device_removed()) {
         encode_error_flag_.exchange(false);
         stop_encode_thread();
@@ -541,14 +527,14 @@ void Supervisor::handle_stalled() {
         return;
     }
 
-    // ソースが復帰した場合は STREAMING に戻る
+    // Return to STREAMING if the source has returned
     if (frame_pump_) {
         int64_t elapsed = time_utils::now_ms() - frame_pump_->last_source_alive_ms();
         if (elapsed < config_.spout.frame_timeout_ms) {
             log_->log_event(spdlog::level::info, "stall_recovered", {});
-            // 実際にフレーム受信が回復したので、保険的ウォッチドッグのカウンターを
-            // クリアする(RTSP のみの再接続では回復しない)。なお同カウンターは
-            // handle_connecting_output() が STREAMING へ正常遷移した場合にもリセットされる。
+            // Frame reception actually recovered, so clear the safety-net watchdog counter
+            // (an RTSP-only reconnect does not recover it). The counter is also reset when
+            // handle_connecting_output() transitions normally to STREAMING.
             consecutive_stall_recoveries_ = 0;
             state_machine_.transition_to(PublisherState::STREAMING);
             return;
@@ -574,18 +560,18 @@ void Supervisor::handle_stalled() {
         if (!spout_monitor_->probe_sender(config_.spout.sender_name)) {
             log_->log_event(spdlog::level::warn, "sender_disappeared", {});
             stop_encode_thread();
-            // Spout/FramePump を解放する。encoder_/rtsp_client_ は
-            // PLACEHOLDER へのシームレス移行のために維持するため
-            // teardown_streaming() ではなく個別に解放する。
+            // Release Spout/FramePump. encoder_/rtsp_client_ are kept for the seamless
+            // handoff to PLACEHOLDER, so release them individually rather than via
+            // teardown_streaming().
             if (frame_pump_) { frame_pump_->stop(); frame_pump_.reset(); }
             spout_monitor_->disconnect();
             if (config_.placeholder.enabled) {
-                // PLACEHOLDER へ直接遷移することで IDLE→PROBING の待機を省略し
-                // 映像フリーズ時間を最小化する。
-                // encoder_+RTSP が生存していればシームレス移行を試みる。
+                // Going directly to PLACEHOLDER skips the IDLE->PROBING wait and
+                // minimizes the video freeze time.
+                // If encoder_+RTSP are alive, attempt a seamless handoff.
                 seamless_handoff_ = encoder_ && rtsp_client_ &&
                                     rtsp_client_->is_connected();
-                placeholder_cooldown_active_ = false;  // クールダウンをキャンセル
+                placeholder_cooldown_active_ = false;  // cancel the cooldown
                 state_machine_.transition_to(PublisherState::PLACEHOLDER);
             } else {
                 teardown_rtsp();
@@ -600,8 +586,8 @@ void Supervisor::handle_stalled() {
     if (stall_timer_.expired(
             static_cast<int64_t>(config_.rtsp.reconnect_delay_ms) * 3)) {
         stop_encode_thread();
-        // プレースホルダが有効で送信元が消失している場合は
-        // RECONNECTING_OUTPUT ではなく PLACEHOLDER へシームレス移行する。
+        // If the placeholder is enabled and the sender is gone, hand off seamlessly
+        // to PLACEHOLDER instead of RECONNECTING_OUTPUT.
         if (config_.placeholder.enabled &&
             !spout_monitor_->probe_sender(config_.spout.sender_name)) {
             log_->log_event(spdlog::level::warn, "sender_disappeared", {});
@@ -614,12 +600,12 @@ void Supervisor::handle_stalled() {
             return;
         }
 
-        // センダーは probe_sender() で健在と確認できているのに、ここに至るのは
-        // 「RTSP のみの再接続では frame_pump_ のフレーム受信が回復しない」
-        // 異常な膠着状態を意味しうる(handle_connecting_output() の恒久修正で
-        // 主要因は解消済みだが、未知の類似要因への保険として残す)。
-        // RTSP 再接続を試みても一向に stall_recovered に至らない状態が
-        // 一定回数続いた場合は、Spout 受信側を含めた完全な再接続を強制する。
+        // probe_sender() confirms the sender is alive, so reaching here can mean an
+        // abnormal deadlock where an RTSP-only reconnect does not restore
+        // frame_pump_ reception (the main cause was fixed permanently in
+        // handle_connecting_output(); this stays as insurance against unknown similar causes).
+        // If RTSP reconnects keep failing to reach stall_recovered for a set number of
+        // attempts, force a full reconnect including the Spout receiver.
         ++consecutive_stall_recoveries_;
         if (supervisor_logic::should_force_spout_recovery(
                 consecutive_stall_recoveries_,
@@ -652,12 +638,11 @@ void Supervisor::handle_recovering_device() {
 
     log_->log_event(spdlog::level::warn, "gpu_device_lost", {});
 
-    // エンコードスレッド・FramePump・RTSP・エンコーダーを順番に解体する。
-    // teardown_encoder() が set_gpu_mode(false) を呼ぶため、
-    // GPU テクスチャポインタの use-after-free を防止できる。
+    // Tear down the encode thread, FramePump, RTSP and encoder in order.
+    // teardown_encoder() calls set_gpu_mode(false), which prevents a
+    // use-after-free of the GPU texture pointer.
     teardown_streaming();
 
-    // SpoutDX デバイスを再作成する
     std::string reinit_err;
     if (!spout_monitor_->reinit_device(reinit_err)) {
         log_->log_error("SPOUT_REINIT_FAILED", reinit_err);
@@ -665,8 +650,8 @@ void Supervisor::handle_recovering_device() {
         return;
     }
 
-    // デバイス再作成成功。PROBING から sender 再接続 → CONNECTING_OUTPUT で
-    // 新デバイスを使ってエンコーダーを再初期化する。
+    // Device recreation succeeded. Reconnect the sender from PROBING and re-initialize
+    // the encoder with the new device in CONNECTING_OUTPUT.
     metrics_->increment_device_lost_recoveries();
     log_->log_event(spdlog::level::info, "gpu_device_reinit_ok", {});
     state_machine_.transition_to(PublisherState::PROBING);
@@ -693,15 +678,15 @@ void Supervisor::handle_reconfiguring() {
         return;
     }
 
-    // 解像度変更でも直近のソース解像度を更新しておく
+    // Update the last source resolution on a resolution change too
     last_source_width_  = current_width_;
     last_source_height_ = current_height_;
 
     frame_pump_->start(spout_monitor_, config_.spout.poll_interval_ms);
     last_frame_time_ms_.store(time_utils::now_ms());
     start_encode_thread();
-    // 解像度変更後の再開始を publish_started で明示する。
-    // handle_connecting_output() と同様にテスト・監視系が検出できるようにする。
+    // Announce the restart after a resolution change via publish_started.
+    // As in handle_connecting_output(), this lets tests/monitoring detect it.
     log_->log_publish_started(config_.rtsp.url,
         static_cast<int>(current_width_), static_cast<int>(current_height_),
         config_.encoder.fps);
@@ -755,9 +740,9 @@ void Supervisor::handle_reconnecting_output() {
     rtsp_backoff_.reset(config_.rtsp.reconnect_delay_ms);
     reconnect_attempts_ = 0;
     last_frame_time_ms_.store(time_utils::now_ms());
-    // 再接続直後の最初のフレームを IDR として送出する。
-    // エンコーダーをリセットせず GOP 内に挿入するため PTS の連続性は保たれる。
-    // これにより接続直後から受信側が黒画面なく映像を表示できる。
+    // Send the first frame after reconnecting as an IDR.
+    // It is inserted into the GOP without resetting the encoder, so PTS stays continuous.
+    // This lets the receiver show video without a black screen right after connecting.
     if (encoder_) encoder_->request_next_idr();
     start_encode_thread();
     state_machine_.transition_to(PublisherState::STREAMING);
@@ -780,11 +765,11 @@ void Supervisor::handle_stopping() {
 bool Supervisor::init_encoder_and_rtsp(uint32_t width, uint32_t height, std::string& error) {
     encoder_ = std::make_unique<EncoderController>();
 
-    // GPU ゼロコピーパスを試みる: SpoutMonitor が保持する D3D11 デバイスと
-    // センダーの実際の DXGI テクスチャフォーマットを渡す。
-    // フォーマットが BGRA 固定で決め打ちされていると、RGBA センダー (Unity/VRChat 等) では
-    // CopySubresourceRegion がフォーマット不一致で無音失敗し常に黒画面になるため、
-    // 実際のフォーマットを動的に取得して渡すことが必要。
+    // Try the GPU zero-copy path: pass SpoutMonitor's D3D11 device and the sender's
+    // actual DXGI texture format.
+    // Hard-coding BGRA would make CopySubresourceRegion fail silently on a format
+    // mismatch for RGBA senders (Unity/VRChat etc.) and always show black, so the
+    // actual format must be fetched dynamically and passed.
     void* gpu_dev = spout_monitor_ ? spout_monitor_->gpu_device() : nullptr;
     const uint32_t sender_fmt = spout_monitor_ ? spout_monitor_->get_sender_dxgi_format() : 0;
     if (!encoder_->init(config_.encoder, width, height, error, gpu_dev, sender_fmt)) {
@@ -792,7 +777,7 @@ bool Supervisor::init_encoder_and_rtsp(uint32_t width, uint32_t height, std::str
         return false;
     }
 
-    // GPU パスが確立された場合は SpoutMonitor を GPU テクスチャモードに切り替える
+    // If the GPU path was established, switch SpoutMonitor to GPU texture mode
     if (encoder_->gpu_path_active()) {
         spout_monitor_->set_gpu_mode(true);
         log_->log_event(spdlog::level::info, "gpu_zero_copy_enabled",
@@ -845,27 +830,26 @@ void Supervisor::encode_publish_thread_func() {
     uint64_t bytes_since_last  = 0;
     uint64_t frames_since_last = 0;
 
-    // 静止画面フリーズフレームキャッシュ。
-    // Spout は画面に変化がない場合新規フレームを送らないため、最後に受信した
-    // フレームを設定 fps で繰り返しエンコードして RTSP ストリームを維持する。
+    // Freeze-frame cache for static scenes.
+    // Spout sends no new frames when the screen does not change, so the last received
+    // frame is re-encoded repeatedly at the configured fps to keep the RTSP stream alive.
     //
-    // handle_connecting_output() が取得した最初のフレームで初期化することで、
-    // 送信側が接続直後から静止状態（SendImage を止めている）でも直ちに映像を
-    // 送れるようになる（ScreenRelay PR #6 と同じ修正）。
+    // Initializing with the first frame obtained by handle_connecting_output() lets
+    // video go out immediately even if the sender is static right after connecting
+    // (SendImage stopped).
     FrameBuffer freeze_buf  = std::move(initial_frame_buf_);
     FrameMeta   freeze_meta = initial_frame_meta_;
-    // GPU パスでは buf.data が空で gpu_texture のみ設定される。
-    // どちらか一方でも有効ならフリーズフレームとして扱う。
+    // On the GPU path buf.data is empty and only gpu_texture is set.
+    // Either one being valid makes it a usable freeze frame.
     bool        has_freeze  = !freeze_buf.data.empty() || freeze_buf.gpu_texture != nullptr;
-    initial_frame_meta_ = {};  // メモリ解放（コピー済み）
-    bool        content_changed = true;  // sws_scale スキップ判定用
+    initial_frame_meta_ = {};  // release memory (already copied)
+    bool        content_changed = true;  // for the sws_scale skip decision
 
-    // 設定 fps に基づくフレーム送信間隔
+    // Frame send interval from the configured fps
     const int64_t frame_interval_us = 1'000'000LL / config_.encoder.fps;
     time_utils::Stopwatch frame_sw;
 
     while (!encode_stop_.load()) {
-        // 次のフレーム送信期限までの残り待機時間を計算する
         int64_t wait_us = frame_interval_us - frame_sw.elapsed_us();
         int wait_ms = (wait_us > 0)
             ? std::min(static_cast<int>(wait_us / 1000) + 1,
@@ -879,7 +863,7 @@ void Supervisor::encode_publish_thread_func() {
             : frame_pump_->try_pop(buf, meta);
 
         if (got_frame) {
-            // 新規フレームを受信: フリーズバッファを更新する
+            // New frame received: update the freeze buffer
             freeze_buf      = std::move(buf);
             freeze_meta     = meta;
             has_freeze      = true;
@@ -888,14 +872,14 @@ void Supervisor::encode_publish_thread_func() {
             metrics_->increment_frames_received();
             log_->log_frame_received(meta.sequence, meta.width, meta.height);
 
-            // 解像度変更
+            // Resolution change
             if (supervisor_logic::resolution_changed(
                     freeze_meta.width, freeze_meta.height, current_width_, current_height_)) {
                 pending_width_.store(freeze_meta.width);
                 pending_height_.store(freeze_meta.height);
-                // 新解像度フレームをスレッド再起動時の初期フリーズフレームとして保存する。
-                // handle_reconfiguring() がエンコーダーを新解像度で再初期化した後、
-                // 次のエンコードスレッドが has_freeze=true で起動できるようにする。
+                // Save the new-resolution frame as the initial freeze frame when the thread restarts.
+                // This lets the next encode thread start with has_freeze=true after
+                // handle_reconfiguring() re-initializes the encoder at the new resolution.
                 initial_frame_buf_  = std::move(freeze_buf);
                 initial_frame_meta_ = freeze_meta;
                 resolution_changed_flag_.store(true);
@@ -903,48 +887,48 @@ void Supervisor::encode_publish_thread_func() {
             }
         }
 
-        // 送信間隔に達していなければスキップ（新規フレーム受信時も同様）
+        // Skip if the send interval has not elapsed (also when a new frame arrived)
         if (frame_sw.elapsed_us() < frame_interval_us) {
             continue;
         }
 
-        // 最初のフレームがまだ来ていない
+        // The first frame has not arrived yet
         if (!has_freeze) {
             continue;
         }
 
-        // ソース切断中はフリーズフレーム送信を抑止する。
-        // STALLED 状態でもエンコードスレッドは動作し続けるが、ソースが
-        // frame_timeout_ms 以上応答していない間はエンコード/送信を止めることで
-        // 無用な CPU・帯域消費を防ぐ。RTSP クライアントにも切断状態が伝わる。
-        // ソースが復帰した瞬間（last_source_alive_ms が更新される）に自動再開する。
+        // Suppress freeze-frame sending while the source is disconnected.
+        // The encode thread keeps running in STALLED, but stopping encode/send while
+        // the source has not responded for frame_timeout_ms or longer avoids useless
+        // CPU and bandwidth use. The RTSP client also learns of the disconnection.
+        // Resumes automatically the moment the source returns (last_source_alive_ms updates).
         if (frame_pump_) {
             int64_t source_age_ms = time_utils::now_ms() - frame_pump_->last_source_alive_ms();
             if (source_age_ms > static_cast<int64_t>(config_.spout.frame_timeout_ms)) {
-                frame_sw.reset();  // 復帰直後に即送信できるようタイマーをリセット
+                frame_sw.reset();  // reset the timer so sending can happen right after recovery
                 continue;
             }
         }
 
-        // フレームタイマーをリセットし、タイムスタンプを現在時刻に統一する
+        // Reset the frame timer and unify timestamps to the current time
         frame_sw.reset();
         freeze_meta.timestamp_us = time_utils::now_us();
 
-        // エンコード。content_changed が false の場合 sws_scale をスキップし
-        // 直前の変換済み YUV フレームを再利用する（静止画面での CPU 負荷削減）
+        // Encode. If content_changed is false, skip sws_scale and reuse the previous
+        // converted YUV frame (reduces CPU load on static scenes)
         std::vector<EncodedPacket> packets;
         if (!encoder_->encode(freeze_buf, freeze_meta, packets, content_changed)) {
             log_->log_error("ENCODER_ENCODE_FAILED", "encode() returned false");
             metrics_->increment_frames_dropped();
-            // フリーズフレームを保存する。エラー後に PROBING→CONNECTING_OUTPUT と
-            // 遷移するため実際には handle_connecting_output() が上書きするが、
-            // 保存しておくことで再接続時の初期フレームとして使われうる。
+            // Save the freeze frame. After an error the state goes PROBING ->
+            // CONNECTING_OUTPUT, so handle_connecting_output() actually overwrites it,
+            // but saving may let it serve as the initial frame on reconnect.
             initial_frame_buf_  = std::move(freeze_buf);
             initial_frame_meta_ = freeze_meta;
             encode_error_flag_.store(true);
             return;
         }
-        // YUV フレームは消費済み。次に新規フレームを受信するまで再変換不要
+        // The YUV frame is consumed; no reconversion until the next new frame arrives
         content_changed = false;
 
         // Publish
@@ -952,10 +936,10 @@ void Supervisor::encode_publish_thread_func() {
             if (!rtsp_client_->send_packet(pkt)) {
                 log_->log_error("RTSP_SEND_FAILED", "send_packet failed");
                 metrics_->increment_rtsp_errors();
-                // RTSP 再接続後は handle_reconnecting_output() がエンコードスレッドを
-                // 再起動するだけで handle_connecting_output() は通らない。
-                // フリーズフレームを保存しておくことで、再接続直後の
-                // has_freeze=true 起動を保証する（静止画面の黒画面防止）。
+                // After an RTSP reconnect, handle_reconnecting_output() only restarts the
+                // encode thread and does not go through handle_connecting_output().
+                // Saving the freeze frame guarantees has_freeze=true right after reconnecting
+                // (prevents a black screen on static scenes).
                 initial_frame_buf_  = std::move(freeze_buf);
                 initial_frame_meta_ = freeze_meta;
                 rtsp_error_flag_.store(true);
@@ -982,11 +966,12 @@ void Supervisor::encode_publish_thread_func() {
         }
     }
 
-    // STALLED → RECONNECTING_OUTPUT のように外部から stop_encode_thread() で
-    // ループを抜けた場合、initial_frame_buf_ は起動時に std::move 済みで空のため、
-    // 次回 start_encode_thread() が has_freeze=false で起動し黒画面になる。
-    // ループ終了時に最後のフリーズフレームを保存し、再起動時に即送信できるようにする。
-    // (解像度変更・encode エラー・RTSP エラーの早期 return パスは既に保存済み)
+    // When the loop is exited externally via stop_encode_thread() (e.g. STALLED ->
+    // RECONNECTING_OUTPUT), initial_frame_buf_ was already moved out at startup and is
+    // empty, so the next start_encode_thread() would start with has_freeze=false
+    // and show black. Save the last freeze frame on loop exit so it can be sent
+    // immediately on restart.
+    // (The early-return paths for resolution change, encode error and RTSP error already save it.)
     if (has_freeze) {
         initial_frame_buf_  = std::move(freeze_buf);
         initial_frame_meta_ = freeze_meta;
@@ -1001,10 +986,10 @@ void Supervisor::teardown_encoder() {
         encoder_->reset();
         encoder_.reset();
     }
-    // GPU テクスチャポインタを保持したまま SpoutMonitor が disconnect すると
-    // use-after-free になるため、エンコーダー解体時に必ず CPU パスへ戻す。
+    // If SpoutMonitor disconnects while a GPU texture pointer is held, it becomes
+    // a use-after-free, so always switch back to the CPU path when tearing down the encoder.
     if (spout_monitor_) spout_monitor_->set_gpu_mode(false);
-    // initial_frame_buf_ が GPU テクスチャポインタを持っている場合もクリアする
+    // Also clear initial_frame_buf_ if it holds a GPU texture pointer
     initial_frame_buf_.gpu_texture = nullptr;
 }
 
@@ -1023,7 +1008,7 @@ void Supervisor::metrics_writer_thread_func() {
     time_utils::Stopwatch metrics_sw;
     time_utils::Stopwatch health_sw;
 
-    // 書き込み失敗は、失敗開始時と原因が変わったときだけ記録する (毎間隔のログ氾濫を避ける)。
+    // Log write failures only when the failure starts or its cause changes (avoids per-interval log flooding)
     std::string metrics_last_error, health_last_error;
     auto save = [this](const char* target, const std::string& path,
                        std::string& last_error, bool is_metrics) {

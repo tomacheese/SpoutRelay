@@ -1,10 +1,10 @@
 #requires -Version 7
-# SpoutRelay エンコーダー設定バリエーション E2E テストスクリプト (pwsh 7+ 必須)
-# 使い方: cd e2e-test; pwsh ./encoder-config-tests.ps1
+# SpoutRelay encoder config variation E2E test script (requires pwsh 7+)
+# Usage: cd e2e-test; pwsh ./encoder-config-tests.ps1
 #
-# config.json の encoder/spout セクションの値を変えた構成 (h264_mf 直接指定、
-# 極端なビットレート、max_b_frames、prefer_dx11:false 等) で spout-relay が
-# 正常に STREAMING に到達し、RTSP ストリームを配信できることを検証する。
+# Verifies that spout-relay reaches STREAMING and serves an RTSP stream with varied
+# encoder/spout values in config.json (h264_mf specified directly, extreme bitrates,
+# max_b_frames, prefer_dx11:false, etc.).
 
 $ErrorActionPreference = "Continue"
 $Root       = Split-Path -Parent $PSScriptRoot
@@ -55,7 +55,7 @@ function Wait-Stream {
     return $false
 }
 
-# config.json をベースに encoder/spout の値を上書きした設定ファイルを生成する
+# Generate a config file based on config.json with encoder/spout values overridden
 function New-EncoderTestConfig {
     param([hashtable]$EncoderOverrides = @{}, [hashtable]$SpoutOverrides = @{})
 
@@ -65,7 +65,7 @@ function New-EncoderTestConfig {
     $base | ConvertTo-Json -Depth 10 | Set-Content -Path $TmpConfig -Encoding UTF8
 }
 
-# 設定を起動し、publish_started まで到達して RTSP ストリームを取得できるか検証する
+# Start with the config and verify it reaches publish_started and the RTSP stream can be fetched
 function Test-EncoderConfig {
     param([string]$Name)
 

@@ -3,21 +3,21 @@
 #include "config/config_loader.hpp"
 #include <string>
 
-/// @brief Spout 映像/デバイスが見つからない間に配信する
-///        プレースホルダ (NO SIGNAL) 映像を 1 枚描画する。
+/// @brief Renders one placeholder (NO SIGNAL) frame, streamed while no Spout
+///        source/device is found.
 ///
-/// GDI を用いて指定解像度のフレームを生成する。背景色で塗りつぶし、
-/// 中央にメッセージ（と任意で待機中の sender 名）を描画する。
+/// Generates a frame at the given resolution using GDI: fills the background and
+/// draws the message at the center (optionally with the awaited sender name).
 ///
-/// エンコーダーは常に AV_PIX_FMT_RGBA 固定で入力を扱う
-/// (encoder_controller.cpp の sws_getContext) ため、返却する FrameBuffer は
-/// 必ず PixelFormat::RGBA・RGBA バイト順で構築する。
+/// The encoder always takes AV_PIX_FMT_RGBA input (sws_getContext in
+/// encoder_controller.cpp), so the returned FrameBuffer is always built as
+/// PixelFormat::RGBA in RGBA byte order.
 ///
-/// @param cfg         placeholder 設定 (メッセージ・色・sender 名表示の有無)
-/// @param sender_name 待機中の Spout sender 名 (show_sender_name 時に表示)
-/// @param width       出力解像度の幅 (px)
-/// @param height      出力解像度の高さ (px)
-/// @return width * height * 4 バイトの RGBA フレームバッファ
+/// @param cfg         placeholder settings (message, colors, whether to show sender name)
+/// @param sender_name awaited Spout sender name (shown when show_sender_name is set)
+/// @param width       output width (px)
+/// @param height      output height (px)
+/// @return RGBA frame buffer of width * height * 4 bytes
 FrameBuffer render_placeholder_frame(const AppConfig::Placeholder& cfg,
                                       const std::string& sender_name,
                                       uint32_t width, uint32_t height);

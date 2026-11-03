@@ -1,37 +1,35 @@
 #pragma once
 #include <cstdint>
 
-/// @brief Supervisor の状態遷移判定のうち、純粋な条件式として切り出せる部分を
-///        まとめた名前空間。
+/// @brief Pure condition checks extracted from the Supervisor's state-transition logic.
 ///
-///        Supervisor 本体は Spout/エンコーダー/RTSP などの実 I/O に依存するため
-///        単体テストが難しいが、ここに切り出した判定ロジックは入力値のみに
-///        依存する純粋関数であり、ユニットテストで網羅的に検証できる。
+///        The Supervisor itself depends on real I/O (Spout, encoder, RTSP) and is hard to
+///        unit-test; the checks here are pure functions of their inputs and can be
+///        covered exhaustively by unit tests.
 namespace supervisor_logic {
 
-/// @brief PLACEHOLDER ⇔ 実ソース間でシームレス切替が可能かどうかを判定する。
+/// @brief Decides whether a seamless PLACEHOLDER <-> real-source switch is possible.
 ///
-///        handle_placeholder()（実ソース復帰時）と
-///        handle_connecting_output()（PLACEHOLDER 復帰後の最初のフレーム受信時）
-///        の両方で使われる共通条件。
+///        Shared by handle_placeholder() (real source returns) and
+///        handle_connecting_output() (first frame after returning from PLACEHOLDER).
 ///
-///        以下を全て満たす場合のみ true を返す:
-///          - シームレス移行が要求されている (seamless_handoff_requested)
-///          - エンコーダーが生存している (encoder_alive)
-///          - RTSP クライアントが接続済みである (rtsp_connected)
-///          - 新しい解像度が現在の解像度と一致している
+///        Returns true only if all of the following hold:
+///          - a seamless handoff was requested (seamless_handoff_requested)
+///          - the encoder is alive (encoder_alive)
+///          - the RTSP client is connected (rtsp_connected)
+///          - the new resolution equals the current one
 ///
-///        いずれかが false の場合、呼び出し側は encoder/RTSP を再初期化する
-///        必要がある。
+///        If any of these is false, the caller must re-initialize the encoder/RTSP
+///        client.
 ///
-/// @param seamless_handoff_requested シームレス移行が要求されているか
-/// @param encoder_alive   エンコーダーインスタンスが生存しているか
-/// @param rtsp_connected  RTSP クライアントが接続済みか
-/// @param new_width       新しい映像の幅
-/// @param new_height      新しい映像の高さ
-/// @param current_width   現在エンコーダーが使用している幅
-/// @param current_height  現在エンコーダーが使用している高さ
-/// @return シームレス切替が可能なら true
+/// @param seamless_handoff_requested whether a seamless handoff was requested
+/// @param encoder_alive   whether the encoder instance is alive
+/// @param rtsp_connected  whether the RTSP client is connected
+/// @param new_width       width of the new video
+/// @param new_height      height of the new video
+/// @param current_width   width currently used by the encoder
+/// @param current_height  height currently used by the encoder
+/// @return true if a seamless switch is possible
 inline bool can_seamless_handoff(bool seamless_handoff_requested,
                                   bool encoder_alive,
                                   bool rtsp_connected,
@@ -42,61 +40,59 @@ inline bool can_seamless_handoff(bool seamless_handoff_requested,
            new_width == current_width && new_height == current_height;
 }
 
-/// @brief 受信フレームの解像度が現在エンコーダーが使用している解像度と
-///        異なるかどうかを判定する。
+/// @brief Decides whether the received frame's resolution differs from the one
+///        the encoder currently uses.
 ///
-///        encode_publish_thread_func() で新規フレーム受信時に呼ばれ、
-///        true の場合 RECONFIGURING への遷移がトリガーされる。
+///        Called by encode_publish_thread_func() on each new frame; a true result
+///        triggers the transition to RECONFIGURING.
 ///
-/// @param frame_width    受信フレームの幅
-/// @param frame_height   受信フレームの高さ
-/// @param current_width  現在エンコーダーが使用している幅
-/// @param current_height 現在エンコーダーが使用している高さ
-/// @return 解像度が変化していれば true
+/// @param frame_width    width of the received frame
+/// @param frame_height   height of the received frame
+/// @param current_width  width currently used by the encoder
+/// @param current_height height currently used by the encoder
+/// @return true if the resolution changed
 inline bool resolution_changed(uint32_t frame_width, uint32_t frame_height,
                                 uint32_t current_width, uint32_t current_height) {
     return frame_width != current_width || frame_height != current_height;
 }
 
-/// @brief handle_connecting_output() の初回フレーム待機ループで、
-///        GPU 接続イベント消費後の最初の ok=true を検出して
-///        タイムアウトタイマーを 1 度だけリセットすべきかどうかを判定する。
+/// @brief In handle_connecting_output()'s wait loop for the first frame, decides whether
+///        to reset the timeout timer, once, on the first ok=true seen after the GPU
+///        connection event has been consumed.
 ///
-///        GPU ゼロコピーパスでは ReceiveTexture() (無引数) の初回呼び出し時に
-///        内部接続イベント (IsUpdated=true) が消費され、is_new=false になる。
-///        その直後にフレームカウンタが更新されるまでの間は ok=true, is_new=false が
-///        連続する可能性があり、タイマーをリセットし続けると無限ループになるため
-///        初回のみリセットを許可する。
+///        On the GPU zero-copy path, the first argument-less ReceiveTexture() call
+///        consumes the internal connection event (IsUpdated=true) and yields is_new=false.
+///        Until the frame counter updates, ok=true/is_new=false can repeat; resetting the
+///        timer every time would loop forever, so only the first reset is allowed.
 ///
-///        呼び出し側は ok=true かつ is_new=false の場合にのみこの関数を呼ぶこと。
-///        true が返った場合は Stopwatch::reset() を呼び出してよい。
+///        Call only when ok=true and is_new=false.
+///        If it returns true, the caller may call Stopwatch::reset().
 ///
-/// @param source_responded [in/out] 初回 ok=true を受け取り済みかどうかのフラグ
-/// @return タイマーをリセットすべきなら true (初回の ok=true のみ)
+/// @param source_responded [in/out] whether the first ok=true was already seen
+/// @return true if the timer should be reset (only for the first ok=true)
 inline bool should_reset_connect_timer_once(bool& source_responded) {
     if (source_responded) return false;
     source_responded = true;
     return true;
 }
 
-/// @brief STALLED からの復帰試行(RTSP 再接続)を繰り返しても実際のフレーム受信が
-///        一度も回復しないまま一定回数を超えた場合に、Spout 受信側を含めた
-///        完全な再接続 (PROBING からのやり直し) を強制すべきかどうかを判定する。
+/// @brief Decides whether to force a full reconnect (restarting from PROBING, including
+///        the Spout receiver) when repeated STALLED recovery attempts (RTSP reconnects)
+///        never restored actual frame reception within the allowed number of attempts.
 ///
-///        handle_stalled() の「送信元消失」判定(stall_timer_ +
-///        sender_missing_timeout_ms、probe_sender() で確認)とは別の、
-///        「センダーは存在し続けているのに frame_pump_ が二度とフレームを
-///        受信できなくなる」という異常な膠着状態に対する保険的なウォッチドッグ。
-///        (例: GPU ゼロコピーパスと CPU パスが同一セッション内で切り替わった際に
-///        spoutDX 内部の更新イベントフラグが正しく再初期化されず、CPU パスの
-///        受信が恒久的に失敗し続けるバグ。RTSP 層の再接続だけでは解消しない)
+///        A safety-net watchdog, separate from handle_stalled()'s sender-missing check
+///        (stall_timer_ + sender_missing_timeout_ms, confirmed via probe_sender()).
+///        It covers the case where the sender still exists but frame_pump_ can never
+///        receive frames again (e.g. spoutDX's internal update-event flag is not
+///        re-initialized when the GPU zero-copy and CPU paths switch within one session,
+///        so CPU-path reception keeps failing; RTSP-layer reconnects do not fix this).
 ///
-///        max_attempts <= 0 の場合はウォッチドッグを無効化する(既定動作を維持)。
+///        max_attempts <= 0 disables the watchdog.
 ///
-/// @param consecutive_stall_recoveries STALLED → RECONNECTING_OUTPUT を試みたが
-///        一度も本当の復帰 (stall_recovered) に至っていない連続回数
-/// @param max_attempts 強制リセットまでの許容回数 (config 由来。0 以下で無効)
-/// @return 強制的に Spout 側を含め再接続すべきなら true
+/// @param consecutive_stall_recoveries consecutive STALLED -> RECONNECTING_OUTPUT attempts
+///        that never led to a real recovery (stall_recovered)
+/// @param max_attempts attempts allowed before forcing a reset (from config; <= 0 disables)
+/// @return true if a full reconnect including the Spout side should be forced
 inline bool should_force_spout_recovery(int consecutive_stall_recoveries,
                                         int max_attempts) {
     return max_attempts > 0 && consecutive_stall_recoveries >= max_attempts;

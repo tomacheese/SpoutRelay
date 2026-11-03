@@ -1,12 +1,12 @@
 #requires -Version 7
-# SpoutRelay モンキーテスト / 追加シナリオテスト
-# 使い方: cd e2e-test; pwsh ./monkey-tests.ps1
+# SpoutRelay monkey tests / additional scenario tests
+# Usage: cd e2e-test; pwsh ./monkey-tests.ps1
 #
-# run-tests.ps1 が検証しない以下のシナリオを確認する:
-#   Test 4  - Sender 切断 (STREAMING→STALLED→sender 復帰→STREAMING)
-#   Test 5  - Placeholder モード（sender なし → NO SIGNAL 配信 → sender 接続 → ハンドオフ）
-#   Test 6  - 連続 RTSP 再接続 (3 回)
-#   Test 7  - libx264 CPU コーデック直接使用
+# Covers scenarios that run-tests.ps1 does not verify:
+#   Test 4  - Sender disconnect (STREAMING->STALLED->sender returns->STREAMING)
+#   Test 5  - Placeholder mode (no sender -> stream NO SIGNAL -> sender connects -> handoff)
+#   Test 6  - Repeated RTSP reconnects (3 times)
+#   Test 7  - Using the libopenh264 CPU codec directly
 
 $ErrorActionPreference = "Continue"
 $Root       = Split-Path -Parent $PSScriptRoot
@@ -84,7 +84,7 @@ New-Item -ItemType Directory -Force $CaptureDir | Out-Null
 New-Item -ItemType Directory -Force $LogDir     | Out-Null
 
 # -----------------------------------------------------------------------
-# Test 4 — STREAMING → Sender 切断 → STALLED → Sender 復帰 → STREAMING
+# Test 4 - STREAMING -> sender disconnects -> STALLED -> sender returns -> STREAMING
 # -----------------------------------------------------------------------
 Write-Host "--- Test 4: Sender disconnect → STALLED → sender reconnect ---"
 
@@ -101,9 +101,9 @@ if (-not (Wait-Stream 35)) {
 } else {
     Info "Stream live! Killing sender to trigger STALLED..."
     Stop-Process -Id $sender.Id -Force -EA SilentlyContinue
-    Start-Sleep -Milliseconds 200  # force-kill が完了するまで待つ
+    Start-Sleep -Milliseconds 200  # wait for the force-kill to complete
 
-    # STALLED への遷移を待つ (frame_timeout_ms=300ms なので 2s 以内に遷移するはず)
+    # Wait for the transition to STALLED (frame_timeout_ms is short in this test config)
     Info "Waiting for STALLED state (up to 4s)..."
     if (Wait-LogEvent -Pattern '"event":"state_changed".*"to":"STALLED"' -TimeoutSec 4) {
         Diag "STALLED detected"
@@ -111,16 +111,16 @@ if (-not (Wait-Stream 35)) {
         Diag "STALLED not confirmed via log — continuing anyway"
     }
 
-    # sender 再起動 (stalled 後も relay は接続を維持するはず)
+    # Restart the sender (the relay should keep its connection after stalling)
     Info "Restarting sender..."
     $sender2 = Start-Process -FilePath "$BuildDir\spout_test_sender.exe" -ArgumentList "TestSpoutSender" -PassThru -WindowStyle Hidden
 
-    # STALLED → STREAMING の復帰を待つ
+    # Wait for recovery STALLED -> STREAMING
     Info "Waiting for stall_recovered / STREAMING (up to 8s)..."
     $recovered = Wait-LogEvent -Pattern '"event":"stall_recovered"|"to":"STREAMING"' -TimeoutSec 8
     if ($recovered) {
         Diag "Stream recovered"
-        # ffprobe でストリームが実際に流れているか確認
+        # Check with ffprobe that the stream is actually flowing
         Start-Sleep -Milliseconds 1000
         $r = & ffprobe -v error -rtsp_transport tcp -i $RTSP `
              -show_entries stream=codec_type -of csv 2>&1
@@ -137,11 +137,11 @@ if (-not (Wait-Stream 35)) {
 }
 
 # -----------------------------------------------------------------------
-# Test 5 — Placeholder モード: sender なし → NO SIGNAL 配信 → sender 接続 → ハンドオフ
+# Test 5 - Placeholder mode: no sender -> stream NO SIGNAL -> sender connects -> handoff
 # -----------------------------------------------------------------------
 Write-Host "`n--- Test 5: Placeholder mode — NO SIGNAL then live handoff ---"
 
-# Placeholder 有効の一時設定ファイルを作る
+# Create a temporary config file with placeholder enabled
 $PlaceholderConfig = @"
 {
   "app": {
@@ -198,7 +198,7 @@ Set-Content $PlaceholderConfigPath $PlaceholderConfig -Encoding UTF8
 
 Clear-RelayLog
 $mtx   = Start-Mediamtx
-# sender を起動せずにリレーだけ起動 → Placeholder に遷移するはず
+# Start only the relay without a sender -> should transition to PLACEHOLDER
 $relay = Start-Process -FilePath "$BuildDir\spout-relay.exe" -ArgumentList "--config",$PlaceholderConfigPath -WorkingDirectory $TestDir -PassThru -WindowStyle Hidden
 
 Info "Waiting for placeholder stream (up to 15s)..."
@@ -223,15 +223,15 @@ if (-not $phOk) {
 } else {
     Diag "Placeholder stream live"
 
-    # sender を接続してハンドオフを確認
+    # Connect the sender and check the handoff
     Info "Starting sender for live handoff..."
     $sender = Start-Process -FilePath "$BuildDir\spout_test_sender.exe" -ArgumentList "TestSpoutSender" -PassThru -WindowStyle Hidden
 
-    # placeholder_source_found → CONNECTING_OUTPUT を待つ
+    # Wait for placeholder_source_found -> CONNECTING_OUTPUT
     Info "Waiting for source handoff (up to 12s)..."
     $handoff = Wait-LogEvent -Pattern '"event":"placeholder_source_found"|"to":"CONNECTING_OUTPUT"' -TimeoutSec 12
     if ($handoff) {
-        # ストリームが継続して流れているか
+        # Check the stream keeps flowing
         Start-Sleep -Milliseconds 2000
         $r2 = & ffprobe -v error -rtsp_transport tcp -i $RTSP `
              -show_entries stream=codec_type -of csv 2>&1
@@ -248,7 +248,7 @@ if (-not $phOk) {
 }
 
 # -----------------------------------------------------------------------
-# Test 6 — 連続 RTSP 再接続 (3 回)
+# Test 6 - Repeated RTSP reconnects (3 times)
 # -----------------------------------------------------------------------
 Write-Host "`n--- Test 6: Triple RTSP reconnect (3 kills) ---"
 
@@ -270,7 +270,6 @@ if (-not (Wait-Stream 35)) {
         Start-Sleep -Seconds 2
         $mtx = Start-Mediamtx
 
-        # RECONNECTING_OUTPUT → STREAMING を待つ
         $deadline20 = (Get-Date).AddSeconds(20)
         $reconnected = $false
         while ((Get-Date) -lt $deadline20) {
@@ -286,7 +285,7 @@ if (-not (Wait-Stream 35)) {
             $allOk = $false
             break
         }
-        Start-Sleep -Milliseconds 500  # 次の kill まで少し安定化
+        Start-Sleep -Milliseconds 500  # settle briefly before the next kill
     }
     if ($allOk) {
         Pass "Triple RTSP reconnect: all 3 kills recovered successfully"
@@ -295,8 +294,8 @@ if (-not (Wait-Stream 35)) {
 }
 
 # -----------------------------------------------------------------------
-# Test 7 — libopenh264 CPU ソフトウェアコーデック直接使用
-# (この FFmpeg ビルドは --disable-libx264 のため libopenh264 を代替に使う)
+# Test 7 - Using the libopenh264 CPU software codec directly
+# (this FFmpeg build has --disable-libx264, so libopenh264 is used instead)
 # -----------------------------------------------------------------------
 Write-Host "`n--- Test 7: CPU codec (libopenh264) direct use ---"
 
@@ -378,9 +377,9 @@ if (-not (Wait-Stream 35)) {
 }
 
 # -----------------------------------------------------------------------
-# Test 8 — STALLED → sender_disappeared → PROBING (プレースホルダなし)
-# 送信元が完全に消えた際に relay が IDLE/PROBING へ戻り、
-# 送信元再起動後に再び STREAMING まで復帰することを検証する。
+# Test 8 - STALLED -> sender_disappeared -> PROBING (no placeholder)
+# Verifies that when the source disappears completely the relay returns to IDLE/PROBING,
+# and recovers to STREAMING again after the source restarts.
 # -----------------------------------------------------------------------
 Write-Host "`n--- Test 8: STALLED → sender_disappeared → PROBING → recovery ---"
 & {
@@ -400,8 +399,8 @@ Write-Host "`n--- Test 8: STALLED → sender_disappeared → PROBING → recover
     Stop-Process -Id $sender.Id -Force -EA SilentlyContinue
     Start-Sleep -Milliseconds 200
 
-    # STALLED → sender_disappeared を待つ
-    # frame_timeout_ms=300ms で STALLED、sender_missing_timeout_ms=800ms で disappeared
+    # Wait for STALLED -> sender_disappeared
+    # STALLED at frame_timeout_ms=300ms, disappeared at sender_missing_timeout_ms=800ms
     Info "Waiting for sender_disappeared (up to 4s)..."
     if (-not (Wait-LogEvent -Pattern '"event":"sender_disappeared"' -TimeoutSec 4)) {
         Fail "sender_disappeared not logged within 4s"
@@ -410,12 +409,12 @@ Write-Host "`n--- Test 8: STALLED → sender_disappeared → PROBING → recover
     }
     Diag "sender_disappeared confirmed"
 
-    # relay が PROBING へ戻ることを確認する (IDLE→PROBING の遷移)
+    # Confirm the relay returns to PROBING (IDLE -> PROBING transition)
     if (-not (Wait-LogEvent -Pattern '"to":"PROBING"' -TimeoutSec 3)) {
         Diag "PROBING not logged — relay may have gone IDLE→PROBING too quickly to catch"
     }
 
-    # RTSP ストリームが停止したことを確認する
+    # Confirm the RTSP stream has stopped
     Start-Sleep -Milliseconds 1000
     $r = & ffprobe -v error -rtsp_transport tcp -i $RTSP `
          -show_entries stream=codec_type -of csv 2>&1
@@ -425,7 +424,7 @@ Write-Host "`n--- Test 8: STALLED → sender_disappeared → PROBING → recover
         Diag "RTSP stream stopped as expected"
     }
 
-    # 送信元を再起動して STREAMING 復帰を確認する
+    # Restart the source and confirm recovery to STREAMING
     Info "Restarting sender for recovery test..."
     $null = Start-Process -FilePath "$BuildDir\spout_test_sender.exe" -ArgumentList "TestSpoutSender" -PassThru -WindowStyle Hidden
 
@@ -440,10 +439,10 @@ Write-Host "`n--- Test 8: STALLED → sender_disappeared → PROBING → recover
 }
 
 # -----------------------------------------------------------------------
-# Test 9 — GPU モード中に sender 消失 → PLACEHOLDER シームレス移行
-# GPU ゼロコピーモードで STREAMING 中に送信元が消えた際、
-# encoder+RTSP を維持したままプレースホルダへシームレス切替し
-# 映像が途切れないことを確認する (GPU→CPU UpdateSubresource フォールバック)。
+# Test 9 - Sender disappears in GPU mode -> seamless switch to PLACEHOLDER
+# Verifies that when the source disappears during STREAMING in GPU zero-copy mode,
+# the relay switches seamlessly to the placeholder keeping encoder+RTSP alive
+# and the video does not break (GPU -> CPU UpdateSubresource fallback).
 # -----------------------------------------------------------------------
 Write-Host "`n--- Test 9: GPU mode STREAMING → sender_disappeared → PLACEHOLDER seamless ---"
 & {
@@ -474,7 +473,7 @@ Write-Host "`n--- Test 9: GPU mode STREAMING → sender_disappeared → PLACEHOL
         Diag "Stream active in CPU mode — proceeding with sender_disappeared test"
     } else {
         Diag "GPU mode confirmed"
-        Start-Sleep -Milliseconds 500  # STREAMING が安定するまで少し待つ
+        Start-Sleep -Milliseconds 500  # wait briefly for STREAMING to stabilize
     }
 
     Info "Killing sender to trigger sender_disappeared → PLACEHOLDER..."
@@ -523,9 +522,9 @@ Write-Host "`n--- Test 9: GPU mode STREAMING → sender_disappeared → PLACEHOL
 }
 
 # -----------------------------------------------------------------------
-# Test 10 — 解像度変更 → RECONFIGURING → STREAMING (spout_res_changer 使用)
-# 送信元が 640x360 → 320x240 に解像度を変更した際に
-# relay が RECONFIGURING を経て正しく再初期化されることを確認する。
+# Test 10 - Resolution change -> RECONFIGURING -> STREAMING (uses spout_res_changer)
+# Verifies that when the source changes from 640x360 to 320x240,
+# the relay re-initializes correctly via RECONFIGURING.
 # -----------------------------------------------------------------------
 Write-Host "`n--- Test 10: Resolution change 640x360 → 320x240 (RECONFIGURING) ---"
 & {
@@ -557,8 +556,8 @@ Write-Host "`n--- Test 10: Resolution change 640x360 → 320x240 (RECONFIGURING)
     }
     Diag "Initial 640x360 stream confirmed"
 
-    # Phase1 は 450 フレーム。Windows の Sleep 精度の影響で実測 20-25s かかることがある。
-    # relay が STREAMING を確認してから phase2 開始まで最大 25s 余裕を持たせる。
+    # Phase 1 is 450 frames. It can take 20-25s in practice due to Windows Sleep precision.
+    # Allow up to 25s between the relay confirming STREAMING and the start of phase 2.
     Info "Waiting for RECONFIGURING state (up to 25s)..."
     if (-not (Wait-LogEvent -Pattern '"to":"RECONFIGURING"' -TimeoutSec 25)) {
         Fail "RECONFIGURING not triggered within 16s of 640x360 stream start"
@@ -568,9 +567,9 @@ Write-Host "`n--- Test 10: Resolution change 640x360 → 320x240 (RECONFIGURING)
     Diag "RECONFIGURING detected"
 
     Info "Waiting for re-STREAMING after RECONFIGURING (up to 15s)..."
-    # publish_started with width=320 を待つ
+    # Wait for publish_started with width=320
     if (-not (Wait-LogEvent -Pattern '"event":"publish_started".*"width":"320"' -TimeoutSec 15)) {
-        # publish_started が見つからなくても STREAMING に戻っていれば許容する
+        # Accept it even without publish_started if the relay is back in STREAMING
         if (-not (Wait-LogEvent -Pattern '"to":"STREAMING"' -TimeoutSec 5)) {
             Fail "Did not re-enter STREAMING after RECONFIGURING within 15s"
             Diag "Relay log tail: $(Get-Content $RelayLog -Tail 5 -EA SilentlyContinue)"
@@ -594,13 +593,13 @@ Write-Host "`n--- Test 10: Resolution change 640x360 → 320x240 (RECONFIGURING)
 }
 
 # -----------------------------------------------------------------------
-# Test 11 — max_reconnect_attempts 超過 → FATAL 状態
-# RTSP が復帰しない状況で relay が正しく FATAL へ遷移して
-# プロセスを終了することを確認する。
+# Test 11 - max_reconnect_attempts exceeded -> FATAL state
+# Verifies that when RTSP never comes back the relay transitions to FATAL
+# and exits the process.
 # -----------------------------------------------------------------------
 Write-Host "`n--- Test 11: max_reconnect_attempts exceeded → FATAL ---"
 & {
-    # FATAL テスト用設定: 再接続を 2 回に制限して高速に FATAL へ遷移させる
+    # Config for the FATAL test: limit reconnects to 2 for a fast transition to FATAL
     $FatalConfig = @'
 {
   "app": {
@@ -660,10 +659,9 @@ Write-Host "`n--- Test 11: max_reconnect_attempts exceeded → FATAL ---"
 
     Info "Stream live! Killing mediamtx permanently..."
     Stop-Process -Id $mtx.Id -Force -EA SilentlyContinue
-    # mediamtx を再起動しない
-    # reconnect_delay_ms=400ms, backoff×2=800ms, connect_timeout=1500ms
-    # → attempt 1: ~1.9s, attempt 2: ~2.3s, attempt 3: > max(2) → FATAL
-    # 合計 ~4.5s
+    # Do not restart mediamtx
+    # Each attempt waits reconnect_delay_ms (doubled by backoff) plus connect_timeout;
+    # the attempt beyond the configured retry maximum goes to FATAL.
 
     Info "Waiting for FATAL state (up to 15s)..."
     if (-not (Wait-LogEvent -Pattern '"event":"fatal_exit"|"to":"FATAL"' -TimeoutSec 15)) {
@@ -673,7 +671,7 @@ Write-Host "`n--- Test 11: max_reconnect_attempts exceeded → FATAL ---"
     }
     Diag "FATAL state detected in log"
 
-    # relay プロセスが自己終了することを確認する (FATAL ハンドラが shutdown_requested_ をセット)
+    # Confirm the relay process exits by itself (the FATAL handler sets shutdown_requested_)
     $exited = $relay.WaitForExit(5000)
     if ($exited) {
         Pass "max_reconnect_attempts exceeded: relay reached FATAL and exited (code: $($relay.ExitCode))"

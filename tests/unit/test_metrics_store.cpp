@@ -113,7 +113,7 @@ int run_metrics_tests() {
     }
 
     {
-        // PLACEHOLDER state (NO SIGNAL 映像を継続配信中) is healthy
+        // PLACEHOLDER state (streaming NO SIGNAL video) is healthy
         MetricsStore ms;
         ms.set_state("PLACEHOLDER");
         std::string path = "test_health_placeholder_tmp.json";
@@ -248,7 +248,7 @@ int run_metrics_tests() {
     }
 
     {
-        // device_lost_recoveries カウンターが metrics.json に出力されること
+        // The device_lost_recoveries counter is written to metrics.json
         MetricsStore ms;
         ms.mark_session_start();
         ms.set_state("STREAMING");
@@ -265,13 +265,13 @@ int run_metrics_tests() {
                    "device_lost_recoveries must be present in metrics.json");
         VERIFY(c.find("\"device_lost_recoveries\": 1") != std::string::npos ||
                c.find("\"device_lost_recoveries\":1") != std::string::npos);
-        f.close();  // Windows では open 中のファイルを std::remove できないため明示的にクローズ
+        f.close();  // std::remove cannot delete a file that is still open on Windows, so close explicitly
         std::remove(path.c_str());
         printf("[PASS] device_lost_recoveries is included in metrics.json\n");
     }
 
     {
-        // 保存失敗時に旧ファイルが失われず、次回リトライで保存されること
+        // A failed save does not lose the old file, and the next retry saves it
         MetricsStore ms;
         ms.mark_session_start();
         ms.set_state("STREAMING");
@@ -279,7 +279,7 @@ int run_metrics_tests() {
         std::remove(path.c_str());
         VERIFY(ms.save_metrics(path));
         {
-            // 内容が変わらずスキップした場合は、書き込み失敗ではないので error は空
+            // When the save is skipped because the content is unchanged it is not a write failure, so error is empty
             std::string skipped_error = "stale";
             VERIFY(!ms.save_metrics(path, &skipped_error));
             VERIFY_MSG(skipped_error.empty(), "skip must not report an error");
@@ -291,7 +291,7 @@ int run_metrics_tests() {
                            std::istreambuf_iterator<char>());
         }
 
-        // tmp 名をディレクトリにして書き込みを失敗させる
+        // Make the write fail by turning the tmp name into a directory
         std::filesystem::create_directory(path + ".tmp");
         ms.set_state("STOPPED");
         std::string error;
@@ -304,7 +304,7 @@ int run_metrics_tests() {
             VERIFY_MSG(after == before, "old metrics.json must be preserved on failure");
         }
 
-        // 障害解消後は同じ内容でも再試行されて保存される
+        // After the fault clears, the same content is retried and saved
         std::filesystem::remove_all(path + ".tmp");
         VERIFY_MSG(ms.save_metrics(path, &error), "save must be retried after failure");
         VERIFY_MSG(error.empty(), "error must be cleared after recovery");

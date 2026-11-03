@@ -1,10 +1,10 @@
 #requires -Version 7
-# SpoutRelay 複数インスタンス同時起動 E2E テストスクリプト (pwsh 7+ 必須)
-# 使い方: cd e2e-test; pwsh ./multi-instance-tests.ps1
+# SpoutRelay multi-instance E2E test script (requires pwsh 7+)
+# Usage: cd e2e-test; pwsh ./multi-instance-tests.ps1
 #
-# instance_name / sender_name / rtsp.url / metrics_path / health_path を
-# それぞれ変えた 2 つの spout-relay インスタンスを同一マシン上で同時に起動し、
-# ログファイル・state ファイル・RTSP ストリームが互いに競合・混在しないことを検証する。
+# Starts two spout-relay instances on the same machine at once, each with different
+# instance_name / sender_name / rtsp.url / metrics_path / health_path,
+# and verifies that log files, state files and RTSP streams neither conflict nor get mixed.
 
 $ErrorActionPreference = "Continue"
 $Root       = Split-Path -Parent $PSScriptRoot
@@ -85,9 +85,9 @@ New-Item -ItemType Directory -Force $StateDir   | Out-Null
 Remove-Item $LogA, $LogB, $HealthA, $HealthB, $MetricsA, $MetricsB -Force -EA SilentlyContinue
 
 # -----------------------------------------------------------------------
-# インスタンス A / B 用の設定ファイルを生成
-# instance_name / sender_name / rtsp.url / metrics_path / health_path を
-# すべて変えることで、ログファイル・state ファイル・RTSP パスの競合を避ける。
+# Generate config files for instances A / B
+# Differing instance_name / sender_name / rtsp.url / metrics_path / health_path
+# avoids conflicts in log files, state files and RTSP paths.
 # -----------------------------------------------------------------------
 function New-MultiConfig {
     param([string]$InstanceName, [string]$SenderName, [string]$RtspUrl,
@@ -144,8 +144,8 @@ New-MultiConfig -InstanceName "spoutrelay-e2e-multi-b" -SenderName "TestSpoutSen
     -RtspUrl $RtspB -MetricsPath "./state/metrics_b.json" -HealthPath "./state/health_b.json" -OutPath $ConfigB
 
 # -----------------------------------------------------------------------
-# Test 1 — 2 つの spout-relay インスタンスを同時起動し、それぞれが独立して
-#          STREAMING に到達すること
+# Test 1 - Start two spout-relay instances at once; each reaches
+#          STREAMING independently
 # -----------------------------------------------------------------------
 Write-Host "--- Test 1: two spout-relay instances start independently ---"
 $mtx = Start-Mediamtx
@@ -165,8 +165,8 @@ $bOk = Wait-LogEvent -Path $LogB -Pattern '"event":"publish_started"' -TimeoutSe
 if ($bOk) { Pass "instance B reached publish_started" } else { Fail "instance B did not reach publish_started within 30s" }
 
 # -----------------------------------------------------------------------
-# Test 2 — ログファイルがインスタンス毎に分離され、互いのイベントが
-#          混在していないこと
+# Test 2 - Log files are separated per instance and events are
+#          not mixed
 # -----------------------------------------------------------------------
 Write-Host "`n--- Test 2: log files are isolated per instance ---"
 if ((Test-Path $LogA) -and (Test-Path $LogB)) {
@@ -189,11 +189,11 @@ if ((Test-Path $LogA) -and (Test-Path $LogB)) {
 }
 
 # -----------------------------------------------------------------------
-# Test 3 — state ファイル (health.json / metrics.json) もインスタンス毎に
-#          分離され、それぞれ自身の sender_name / rtsp_url を反映すること
+# Test 3 - State files (health.json / metrics.json) are also separated per
+#          instance and each reflects its own sender_name / rtsp_url
 # -----------------------------------------------------------------------
 Write-Host "`n--- Test 3: state files are isolated and reflect per-instance values ---"
-Start-Sleep -Milliseconds 1500  # emit_*_interval_ms (=500ms) より長く待つ
+Start-Sleep -Milliseconds 1500  # wait longer than emit_*_interval_ms (=500ms)
 
 $metricsA = Wait-JsonFile -Path $MetricsA -TimeoutSec 10
 $metricsB = Wait-JsonFile -Path $MetricsB -TimeoutSec 10
@@ -225,8 +225,8 @@ if ($null -ne $healthA -and $null -ne $healthB) {
 }
 
 # -----------------------------------------------------------------------
-# Test 4 — 両方の RTSP ストリームが個別に再生可能であること
-#          (一方のインスタンスがもう一方のパスに干渉していないことの確認)
+# Test 4 - Both RTSP streams can be played back individually
+#          (confirms neither instance interferes with the other's path)
 # -----------------------------------------------------------------------
 Write-Host "`n--- Test 4: both RTSP streams are independently playable ---"
 $rA = & ffprobe -v error -rtsp_transport tcp -i $RtspA -show_entries stream=codec_type -of csv 2>&1

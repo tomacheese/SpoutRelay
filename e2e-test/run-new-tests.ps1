@@ -1,5 +1,5 @@
 #requires -Version 7
-# Tests 8-11 単体実行スクリプト (monkey-tests.ps1 の新規テストのみ)
+# Standalone runner for Tests 8-11 (only the new tests from monkey-tests.ps1)
 $ErrorActionPreference = "Continue"
 $Root       = Split-Path -Parent $PSScriptRoot
 $BuildDir   = "$Root\build"

@@ -32,7 +32,7 @@ void test_load_minimal_valid() {
     VERIFY(cfg.rtsp.url == "rtsp://192.168.0.100:8554/live");
     VERIFY(cfg.encoder.fps == 30);
     VERIFY(cfg.encoder.bitrate_kbps == 4000);
-    // placeholder セクション省略時は既存挙動を維持する既定値となること
+    // The placeholder section defaults preserve the existing behavior when omitted
     VERIFY(cfg.placeholder.enabled == false);
     VERIFY(cfg.placeholder.width == 1280);
     VERIFY(cfg.placeholder.height == 720);
@@ -61,8 +61,8 @@ void test_load_stalled_recovery_max_attempts() {
 }
 
 void test_stalled_recovery_max_attempts_zero_disables_watchdog() {
-    // 0 以下はウォッチドッグ無効化を意味する仕様上の正当な値であり、
-    // バリデーションエラーにはしない
+    // A value <= 0 is a legitimate setting that disables the watchdog,
+    // so it is not a validation error
     const std::string json = R"({
       "spout": { "sender_name": "TestSender", "stalled_recovery_max_attempts": 0 },
       "rtsp": { "url": "rtsp://192.168.0.100:8554/live" },
@@ -278,7 +278,7 @@ void test_empty_sender_name_fails() {
 }
 
 // -----------------------------------------------------------------------
-// issue #20 の調査で判明した未テストの検証ルールを網羅する
+// Config validation rules
 // -----------------------------------------------------------------------
 
 void test_fps_over_limit_fails() {

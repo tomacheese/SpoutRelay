@@ -22,7 +22,7 @@ int run_atomic_file_tests() {
     printf("=== Atomic File Tests ===\n");
 
     {
-        // 新規作成できること。tmp ファイルが残らないこと
+        // Can create a new file; no tmp file is left behind
         std::string path = "test_atomic_new_tmp.json";
         std::remove(path.c_str());
         std::string error = "stale";
@@ -35,7 +35,7 @@ int run_atomic_file_tests() {
     }
 
     {
-        // 既存ファイルを上書きできること (複数回)
+        // Can overwrite an existing file (repeatedly)
         std::string path = "test_atomic_overwrite_tmp.json";
         std::remove(path.c_str());
         VERIFY(atomic_file::write(path, "first"));
@@ -48,7 +48,7 @@ int run_atomic_file_tests() {
     }
 
     {
-        // 親ディレクトリが無くても作成されること
+        // Creates the parent directory if it is missing
         std::string dir  = "test_atomic_dir_tmp";
         std::string path = dir + "/nested/health.json";
         fs::remove_all(dir);
@@ -59,8 +59,8 @@ int run_atomic_file_tests() {
     }
 
     {
-        // tmp への書き込みに失敗した場合、旧ファイルの内容が保持されること
-        // ("<path>.tmp" をディレクトリにして open を失敗させる)
+        // If writing to tmp fails, the old file content is preserved
+        // (inject by making "<path>.tmp" a directory so open fails)
         std::string path = "test_atomic_keep_open_tmp.json";
         std::remove(path.c_str());
         fs::remove_all(path + ".tmp");
@@ -77,9 +77,9 @@ int run_atomic_file_tests() {
 
 #ifndef _WIN32
     {
-        // tmp への書き込みが ENOSPC で失敗した場合 (flush/close の失敗)、
-        // 旧ファイルを不完全な内容で置換しないこと
-        // ("<path>.tmp" を /dev/full へのシンボリックリンクにして注入する)
+        // If writing to tmp fails with ENOSPC (flush/close failure),
+        // the old file must not be replaced with partial content
+        // (inject by making "<path>.tmp" a symlink to /dev/full)
         if (fs::exists("/dev/full")) {
             std::string path = "test_atomic_enospc_tmp.json";
             std::remove(path.c_str());
@@ -98,9 +98,9 @@ int run_atomic_file_tests() {
 
 #ifdef _WIN32
     {
-        // 宛先が FILE_SHARE_DELETE なしで開かれている (置換が共有違反になる) 間、
-        // リトライ上限まで失敗しても旧内容が保持され tmp も残らないこと。
-        // ハンドルを閉じた後は置換できること。
+        // While the destination is open without FILE_SHARE_DELETE (replacement hits a sharing violation),
+        // the old content is preserved and no tmp is left even after the retry limit.
+        // Replacement succeeds once the handle is closed.
         std::string path = "test_atomic_sharing_tmp.json";
         std::remove(path.c_str());
         VERIFY(atomic_file::write(path, "old"));
@@ -122,8 +122,8 @@ int run_atomic_file_tests() {
 #endif
 
     {
-        // 置換に失敗した場合、旧内容が保持され tmp も残らないこと
-        // (宛先を空でないディレクトリにして置換を失敗させる)
+        // If replacement fails, the old content is preserved and no tmp is left
+        // (inject by making the destination a non-empty directory)
         std::string path = "test_atomic_keep_replace_tmp";
         fs::remove_all(path);
         fs::create_directories(path + "/child");

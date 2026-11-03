@@ -1,19 +1,19 @@
 #requires -Version 7
-# cli-tests.ps1 から呼び出される使い捨てヘルパースクリプト。
+# Throwaway helper script invoked from cli-tests.ps1.
 #
-# AttachConsole + GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0) は
-# 呼び出し元プロセスがアタッチしているコンソールの全プロセスに信号を送るため、
-# cli-tests.ps1 (親 pwsh) のプロセスから直接呼ぶと親自身も終了してしまう。
-# そのため、この使い捨て子プロセスの中で Attach/Generate を行う。
+# AttachConsole + GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0) signals every process
+# on the console the caller is attached to, so calling it directly from the
+# cli-tests.ps1 (parent pwsh) process would terminate the parent too.
+# Attach/Generate therefore runs inside this throwaway child process.
 #
-# 引数:
-#   -TargetPid    : CTRL_BREAK_EVENT を送信する対象プロセスの PID
-#   -MarkerFile   : AttachConsole 成功後に作成するマーカーファイルのパス
+# Arguments:
+#   -TargetPid    : PID of the process to send CTRL_BREAK_EVENT to
+#   -MarkerFile   : path of the marker file created after AttachConsole succeeds
 #
-# 注意: GenerateConsoleCtrlEvent はこのヘルパー自身にも CTRL_BREAK を送るため、
-#       SetConsoleCtrlHandler(NULL, TRUE) で自プロセスへの影響を抑止しても
-#       終了コードが正常に返らない場合がある。呼び出し側はマーカーファイルの
-#       有無で AttachConsole/送信の成否を判定すること。
+# Note: GenerateConsoleCtrlEvent also sends CTRL_BREAK to this helper itself, so
+#       even with SetConsoleCtrlHandler(NULL, TRUE) suppressing it for this process
+#       the exit code may not be returned normally. The caller must judge
+#       AttachConsole/send success by the presence of the marker file.
 param(
     [int]$TargetPid,
     [string]$MarkerFile
@@ -34,8 +34,8 @@ public static extern bool SetConsoleCtrlHandler(IntPtr HandlerRoutine, bool Add)
 $attached = [SpoutRelayCli.CtrlBreakHelper]::AttachConsole([uint32]$TargetPid)
 if (-not $attached) { exit 1 }
 
-# 自プロセスへの CTRL_BREAK を無視する (完全に防げない場合があるため
-# 成否判定はマーカーファイルで行う)
+# Ignore CTRL_BREAK to this process (it cannot always be fully prevented,
+# so success is judged by the marker file)
 [SpoutRelayCli.CtrlBreakHelper]::SetConsoleCtrlHandler([IntPtr]::Zero, $true) | Out-Null
 
 Set-Content -Path $MarkerFile -Value "attached" -NoNewline

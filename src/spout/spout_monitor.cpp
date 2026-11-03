@@ -8,26 +8,26 @@
 struct SpoutMonitor::Impl {
     spoutDX    receiver;
     SenderInfo current_info;
-    /// connect() が呼ばれ disconnect() がまだ呼ばれていないことを示すフラグ。
-    /// receive_latest_frame() 内では更新しない。センダーの実接続状態は
-    /// receiver.IsConnected() で確認し、is_connected() は両方を AND する。
+    /// Set once connect() is called and cleared by disconnect().
+    /// Not updated in receive_latest_frame(); the sender's real connection state is
+    /// checked via receiver.IsConnected(), and is_connected() ANDs both.
     bool       connected  = false;
     uint64_t   sequence   = 0;
-    bool       gpu_mode   = false;  ///< true: ReceiveTexture() パス, false: ReceiveImage() パス
+    bool       gpu_mode   = false;  ///< true: ReceiveTexture() path, false: ReceiveImage() path
     mutable std::mutex mutex_;
 };
 
 SpoutMonitor::SpoutMonitor()  : impl_(std::make_unique<Impl>()) {}
 SpoutMonitor::~SpoutMonitor() { disconnect(); }
 
-/// @brief D3D11 Immediate Context のマルチスレッド保護を有効にする。
-///        init() と reinit_device() の両方から呼び出す共通ヘルパー。
-///        init() はシングルスレッド起動中にロックなしで呼び出す。
-///        reinit_device() は impl_->mutex_ 保持済みの状態で呼び出す。
+/// @brief Enables multithread protection on the D3D11 immediate context.
+///        Shared helper called from both init() and reinit_device().
+///        init() calls it lock-free during single-threaded startup;
+///        reinit_device() calls it while holding impl_->mutex_.
 static void setup_device_mt_protection(spoutDX& receiver) {
-    // D3D11 Immediate Context のスレッド安全性を有効化する (ScreenRelay PR #7 由来)。
-    // EncoderController が別スレッドから CopySubresourceRegion を呼び出すため、
-    // ID3D10Multithread インターフェースで排他制御を有効にする。
+    // Enable thread safety on the D3D11 immediate context.
+    // EncoderController calls CopySubresourceRegion from another thread, so enable
+    // locking via the ID3D10Multithread interface.
     ID3D11Device* device = receiver.GetDX11Device();
     if (device) {
         ID3D10Multithread* mt = nullptr;
@@ -40,9 +40,9 @@ static void setup_device_mt_protection(spoutDX& receiver) {
 }
 
 bool SpoutMonitor::init(std::string& error) {
-    // 自動アダプタ切り替えは無効化する。有効だと共有ハンドル変更時に
-    // CheckSenderTexture() が impl_->mutex_ 保持中に D3D11 デバイスを
-    // 同期的に再生成し、フリーズの原因になりうる (詳細: PR #36)。
+    // Disable automatic adapter switching. When enabled, a changed shared handle makes
+    // CheckSenderTexture() recreate the D3D11 device synchronously while holding
+    // impl_->mutex_, which can freeze.
     impl_->receiver.SetAdapterAuto(false);
     if (!impl_->receiver.OpenDirectX11()) {
         error = "Failed to initialise DirectX 11 for Spout receiver";
@@ -104,41 +104,42 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
     bool ok = false;
 
     if (impl_->gpu_mode) {
-        // デバイスロスト時は ReceiveTexture() を呼ばずに早期リターンする。
-        // 死んだデバイスへの SpoutDX 呼び出しはアクセス違反を引き起こす可能性がある。
+        // On device loss, return early without calling ReceiveTexture();
+        // SpoutDX calls on a dead device can cause an access violation.
         {
             ID3D11Device* dev = impl_->receiver.GetDX11Device();
             if (dev && dev->GetDeviceRemovedReason() != S_OK)
                 return false;
         }
 
-        // GPU ゼロコピーパス:
-        //   ReceiveTexture() (引数なし) で SpoutDX 内部テクスチャ (m_pTexture) を
-        //   更新し、GetSenderTexture() でそのポインタを取得して FrameBuffer に
-        //   格納する。CPU メモリへの読み戻しは発生しない。
-        //   ※ ReceiveTexture(ID3D11Texture2D**) は呼び元で確保済みテクスチャを
-        //      渡す API であり、*ppTexture が null だと false を返すため使用しない。
+        // GPU zero-copy path:
+        //   ReceiveTexture() (no arguments) updates SpoutDX's internal texture
+        //   (m_pTexture); GetSenderTexture() returns its pointer, which is stored in
+        //   the FrameBuffer. No readback to CPU memory occurs.
+        //   Note: ReceiveTexture(ID3D11Texture2D**) takes a caller-allocated texture and
+        //   returns false if *ppTexture is null, so it is not used.
         ok = impl_->receiver.ReceiveTexture();
 
-        // impl_->connected はここで更新しない。
-        // impl_->connected = impl_->receiver.IsConnected() とすると、センダーが一時切断した際に
-        // false になり、復帰後も receive_latest_frame() 冒頭のガードで弾かれ続ける。
-        // SetReceiverName() 済みの SpoutDX は ReceiveTexture() を再呼び出しすれば
-        // センダー復帰を自動検出できるため、ここでは connected を変更しない。
-        // センダー消失の検出は last_source_alive_ms() の停滞を使う Supervisor 側で行う。
+        // Do not update impl_->connected here.
+        // Setting it from receiver.IsConnected() would make it false while the sender
+        // is temporarily disconnected, and the guard at the top of receive_latest_frame()
+        // would keep rejecting calls after it returns. SpoutDX with SetReceiverName()
+        // detects the sender's return by calling ReceiveTexture() again, so connected
+        // is left unchanged.
+        // Sender loss is detected by the Supervisor via a stalled last_source_alive_ms().
         if (!ok) return false;
 
-        // 寸法変更 / 初回接続更新イベントの処理
+        // Handle dimension changes / the initial connection update event
         //
-        // ReceiveTexture() (引数なし) は内部で m_bUpdated をリセットするため
-        // IsUpdated() は常に false を返す。そのため IsUpdated() に加えて
-        // GetSenderWidth/Height() を直接比較して寸法変更を確実に検出する。
-        // （ReceiveImage() や ReceiveTexture(ppTexture) は IsUpdated() が機能するが
-        //   ReceiveTexture() 無引数版のみ内部処理でフラグを消費してしまう仕様）
+        // ReceiveTexture() (no arguments) resets m_bUpdated internally, so IsUpdated()
+        // always returns false. Compare GetSenderWidth/Height() directly, in addition to
+        // IsUpdated(), to reliably detect dimension changes.
+        // (IsUpdated() works with ReceiveImage() and ReceiveTexture(ppTexture); only the
+        // no-argument ReceiveTexture() consumes the flag internally.)
         {
             unsigned int nw = impl_->receiver.GetSenderWidth();
             unsigned int nh = impl_->receiver.GetSenderHeight();
-            bool updated = impl_->receiver.IsUpdated();  // 初回接続時などは true
+            bool updated = impl_->receiver.IsUpdated();  // true e.g. on first connection
             bool dim_changed = (nw && nh && (nw != w || nh != h));
 
             if (updated || dim_changed) {
@@ -147,43 +148,43 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
                 impl_->current_info.name   = impl_->receiver.GetSenderName();
                 impl_->current_info.fps    = static_cast<float>(impl_->receiver.GetSenderFps());
                 if (nw && nh && (nw != w || nh != h)) { w = nw; h = nh; }
-                is_new = false;  // 更新イベント: 次回呼び出しで実データ取得
+                is_new = false;  // update event: fetch real data on the next call
             } else {
                 is_new = impl_->receiver.IsFrameNew();
             }
         }
 
-        // GetSenderTexture() は SpoutDX 内部テクスチャのポインタを返す。
-        // このポインタは次回 ReceiveTexture() 呼び出しまで有効。
-        // フォーマットはセンダー依存: BGRA (87) が多いが Unity/VRChat 等は RGBA (28) を使う。
-        // EncoderController::init() が get_sender_dxgi_format() で取得した値に基づいて
-        // GPU プールのフォーマットを合わせているため、センダーに合わせた値を設定する。
+        // GetSenderTexture() returns a pointer to SpoutDX's internal texture,
+        // valid until the next ReceiveTexture() call.
+        // The format depends on the sender: mostly BGRA (87), but Unity/VRChat etc. use RGBA (28).
+        // EncoderController::init() sizes the GPU pool from get_sender_dxgi_format(),
+        // so the value set here follows the sender.
         ID3D11Texture2D* tex = impl_->receiver.GetSenderTexture();
 
-        buf.data.clear();             // GPU パスでは CPU バッファ不要
-        buf.gpu_texture = tex;        // EncoderController が CopySubresourceRegion に使用
+        buf.data.clear();             // no CPU buffer needed on the GPU path
+        buf.gpu_texture = tex;        // used by EncoderController for CopySubresourceRegion
         buf.width  = w;
         buf.height = h;
-        // EncoderController のフォーマット選択ロジック (encoder_controller.cpp) と方向を揃える:
-        //   DXGI_FORMAT_R8G8B8A8_UNORM (RGBA) → PixelFormat::RGBA
-        //   それ以外 (DXGI_FORMAT_B8G8R8A8_UNORM=BGRA および未知フォーマット) → PixelFormat::BGRA
-        // ※ 未知フォーマットは BGRA 扱いとすることで encoder 側デフォルトと一致させる。
+        // Mirrors the encoder's format selection logic (encoder_controller.cpp):
+        //   DXGI_FORMAT_R8G8B8A8_UNORM (RGBA) -> PixelFormat::RGBA
+        //   anything else (DXGI_FORMAT_B8G8R8A8_UNORM=BGRA and unknown formats) -> PixelFormat::BGRA
+        // Unknown formats are treated as BGRA to match the encoder default.
         const DWORD dxgi_fmt = impl_->receiver.GetSenderFormat();
         buf.format = (dxgi_fmt == DXGI_FORMAT_R8G8B8A8_UNORM) ? PixelFormat::RGBA : PixelFormat::BGRA;
     } else {
-        // CPU パス（従来動作）
+        // CPU path (legacy behavior)
         size_t required = static_cast<size_t>(w) * h * 4;
         if (buf.data.size() != required) buf.data.resize(required);
 
         // bRGB=false, bInvert=false → RGBA output (raw DX11 texture order)
         ok = impl_->receiver.ReceiveImage(buf.data.data(), w, h, false, false);
 
-        // impl_->connected はここで更新しない (GPU パスと同理由)。
-        // センダーが一時切断→復帰した場合でも ReceiveImage() は再呼び出しで
-        // 自動再接続するため、connected フラグを false に倒してはいけない。
+        // Do not update impl_->connected here (same reason as the GPU path).
+        // ReceiveImage() reconnects automatically when called again after the sender
+        // disconnects and returns, so connected must not be cleared.
         if (!ok) return false;
 
-        // 寸法変更 / 初回接続更新イベントの処理
+        // Handle dimension changes / the initial connection update event
         if (impl_->receiver.IsUpdated()) {
             unsigned int nw = impl_->receiver.GetSenderWidth();
             unsigned int nh = impl_->receiver.GetSenderHeight();
@@ -205,7 +206,7 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
             is_new = impl_->receiver.IsFrameNew();
         }
 
-        buf.gpu_texture = nullptr;  // CPU パスでは GPU テクスチャ不要
+        buf.gpu_texture = nullptr;  // no GPU texture on the CPU path
         buf.width  = w;
         buf.height = h;
         buf.format = PixelFormat::RGBA;
@@ -226,9 +227,9 @@ SenderInfo SpoutMonitor::get_sender_info() const {
 
 bool SpoutMonitor::is_connected() const {
     std::lock_guard<std::mutex> lock(impl_->mutex_);
-    // 既知の制約: SetAdapterAuto(false) 環境でアダプタ不一致の共有ハンドルを
-    // 開けなかった場合、SDK 内部の IsConnected() が古い true のまま残ることがある
-    // (呼び出し元が未使用のため実害なし、PR #36)。
+    // Known limitation: with SetAdapterAuto(false), if a shared handle from a
+    // mismatched adapter cannot be opened, the SDK's IsConnected() may stay true
+    // (harmless since no caller relies on it).
     return impl_->connected && impl_->receiver.IsConnected();
 }
 
@@ -244,10 +245,10 @@ void SpoutMonitor::set_gpu_mode(bool enabled) {
 
 uint32_t SpoutMonitor::get_sender_dxgi_format() const {
     std::lock_guard<std::mutex> lock(impl_->mutex_);
-    // GetSenderFormat() は DXGI_FORMAT を DWORD で返す。
-    // connect() は impl_->connected=true にするだけで実接続前でも true になり得るため、
-    // is_connected() と同様に receiver.IsConnected() も確認することで、
-    // 未接続状態での GetSenderFormat() のデフォルト値/前回値の混入を防ぐ。
+    // GetSenderFormat() returns a DXGI_FORMAT as a DWORD.
+    // connect() only sets impl_->connected=true, which can be true before a real
+    // connection, so also check receiver.IsConnected() as is_connected() does.
+    // This avoids leaking GetSenderFormat()'s default/stale value while disconnected.
     if (!impl_->connected || !impl_->receiver.IsConnected()) return 0;
     return static_cast<uint32_t>(impl_->receiver.GetSenderFormat());
 }
@@ -261,14 +262,13 @@ bool SpoutMonitor::is_device_removed() const {
 
 bool SpoutMonitor::reinit_device(std::string& error) {
     std::lock_guard<std::mutex> lock(impl_->mutex_);
-    // 既存の受信セッションとデバイスを破棄する
+    // Discard the existing receive session and device
     impl_->receiver.ReleaseReceiver();
     impl_->receiver.CloseDirectX11();
     impl_->connected      = false;
     impl_->current_info   = SenderInfo{};
-    impl_->gpu_mode       = false;  // CPU パスへ戻し、再初期化後に Supervisor が再設定する
+    impl_->gpu_mode       = false;  // back to the CPU path; the Supervisor re-enables it after reinit
 
-    // D3D11 デバイスを再作成する
     if (!impl_->receiver.OpenDirectX11()) {
         error = "Failed to re-create DirectX 11 device after device loss";
         return false;

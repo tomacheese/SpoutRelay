@@ -1,12 +1,12 @@
-# 設定リファレンス
+# Configuration Reference
 
-設定ファイルは JSON 形式です。`--config` オプションでパスを指定します。
+The configuration file is JSON. Pass its path with `--config` (or `-c`); if omitted, `config/config.json` is used. Any key that is omitted falls back to the default listed below. A template is provided in [`config/config.example.json`](../config/config.example.json).
 
 ```powershell
 spout-relay.exe --config config/config.json
 ```
 
-## 完全なサンプル
+## Full example
 
 ```json
 {
@@ -26,7 +26,7 @@ spout-relay.exe --config config/config.json
   },
   "encoder": {
     "codec": "h264_nvenc",
-    "fallback_codec": "libx264",
+    "fallback_codec": "h264_mf",
     "bitrate_kbps": 4000,
     "fps": 30,
     "gop_size": 30,
@@ -63,34 +63,34 @@ spout-relay.exe --config config/config.json
 
 ---
 
-## `app` セクション
+## `app` section
 
-| キー | 型 | デフォルト | 説明 |
-|-----|----|-----------|------|
-| `instance_name` | string | `"spoutrelay-publisher-01"` | ログ・メトリクスに付与するインスタンス識別名 |
-| `log_dir` | string | `"./logs"` | JSON Lines ログファイルの出力ディレクトリ |
-| `metrics_path` | string | `"./state/metrics.json"` | ランタイムメトリクス JSON の書き出しパス |
-| `health_path` | string | `"./state/health.json"` | ヘルスステータス JSON の書き出しパス |
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `instance_name` | string | `"spoutrelay-publisher-01"` | Instance identifier; also the log file name (`<instance_name>.jsonl`) |
+| `log_dir` | string | `"./logs"` | Output directory for JSON Lines log files |
+| `metrics_path` | string | `"./state/metrics.json"` | Output path for the runtime metrics JSON |
+| `health_path` | string | `"./state/health.json"` | Output path for the health status JSON |
 
 ---
 
-## `spout` セクション
+## `spout` section
 
-| キー | 型 | デフォルト | 説明 |
-|-----|----|-----------|------|
-| `sender_name` | string | **必須** | 接続する Spout センダーの名前（必須）。Spout 共有メモリに登録されている名前と完全一致。空文字は設定エラー |
-| `poll_interval_ms` | int | `50` | センダー探索・フレーム受信のポーリング間隔（ミリ秒） |
-| `frame_timeout_ms` | int | `300` | フレーム受信タイムアウト（ミリ秒）。この時間内にフレームが来なければ `SPOUT_RECEIVE_FAILED` |
-| `sender_missing_timeout_ms` | int | `800` | センダーが見つからない場合の PROBING 状態での待機上限（ミリ秒） |
-| `prefer_dx11` | bool | `true` | DX11 共有テクスチャを優先（現在は常に true で動作） |
-| `stalled_recovery_max_attempts` | int | `10` | `STALLED` から RTSP のみの再接続 (`RECONNECTING_OUTPUT`) を試みても一度もフレーム受信が回復しないまま連続失敗した場合に、Spout 受信側を含めた完全な再接続 (`PROBING` からのやり直し) を強制するまでの許容回数。`0` 以下でウォッチドッグ無効化 |
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `sender_name` | string | **required** | Name of the Spout sender to connect to. Must match the name registered in Spout shared memory exactly. An empty string is a configuration error |
+| `poll_interval_ms` | int | `50` | Polling interval (ms) for sender probing and frame reception |
+| `frame_timeout_ms` | int | `300` | Frame reception timeout (ms). If no frame or source response arrives within this time while `STREAMING`, the state becomes `STALLED`. While `CONNECTING_OUTPUT`, the wait for the first frame is `5 ×` this value, after which `SPOUT_RECEIVE_FAILED` is logged and the state returns to `PROBING` |
+| `sender_missing_timeout_ms` | int | `800` | In `STALLED`, how long to wait (ms) before checking whether the sender has disappeared. Also scales the `probe_no_sender` debug log in `PROBING` (once every `10 ×` this value) |
+| `prefer_dx11` | bool | `true` | Accepted for compatibility but ignored: DX11 shared textures are always used. Setting `false` logs a `prefer_dx11_ignored` warning |
+| `stalled_recovery_max_attempts` | int | `10` | Number of consecutive `STALLED` → `RECONNECTING_OUTPUT` cycles without any frame recovery after which a full reconnect including the Spout receiver (restart from `PROBING`) is forced. `0` or less disables this watchdog |
 
-### センダー名の調べ方
+### Finding the sender name
 
-Spout センダー名は送信側アプリケーションが登録します。VRChat の場合は通常 `VRCSender1` です。[SpoutPanel](https://spout.zeal.co/) や本プロジェクトの PowerShell スニペットで確認できます。
+The sending application registers the Spout sender name. For VRChat it is usually `VRCSender1`. You can check it with [SpoutPanel](https://spout.zeal.co/) or with this PowerShell snippet.
 
 ```powershell
-# Spout共有メモリからセンダー名一覧を取得
+# List sender names from Spout shared memory
 $mmf = [System.IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting("SpoutSenderNames")
 $accessor = $mmf.CreateViewAccessor()
 $buf = New-Object byte[] (256 * 10)
@@ -103,105 +103,107 @@ for ($i = 0; $i -lt 10; $i++) {
 
 ---
 
-## `encoder` セクション
+## `encoder` section
 
-| キー | 型 | デフォルト | 説明 |
-|-----|----|-----------|------|
-| `codec` | string | `"h264_nvenc"` | 優先エンコーダー。FFmpeg コーデック名（`h264_nvenc`, `libx264`, `h264_amf` 等） |
-| `fallback_codec` | string | `"libx264"` | `codec` が利用できない場合のフォールバック。空文字でフォールバック無効 |
-| `bitrate_kbps` | int | `4000` | 目標ビットレート（kbps） |
-| `fps` | int | `30` | エンコードフレームレート |
-| `gop_size` | int | `30` | GOP サイズ（キーフレーム間隔）。`fps` と同値で 1 秒ごとにキーフレーム |
-| `max_b_frames` | int | `0` | B フレームの最大数。低遅延配信では `0` 推奨 |
-| `preset` | string | `"fast"` | エンコーダープリセット（速度 vs 品質）。`ultrafast` / `fast` / `medium` 等 |
-| `tune` | string | `"zerolatency"` | libx264 用チューン。**NVENC では無視される** |
-| `threads` | int | `0` | エンコードスレッド数。`0` で自動 |
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `codec` | string | `"h264_nvenc"` | Preferred encoder, as an FFmpeg encoder name (`h264_nvenc`, `h264_mf`, `h264_amf`, `libopenh264`, etc.). Must exist in the FFmpeg build in use; the LGPL builds shipped with releases do not include `libx264` |
+| `fallback_codec` | string | `"h264_mf"` | Used when `codec` cannot be opened. An empty string disables the fallback |
+| `bitrate_kbps` | int | `4000` | Target bitrate (kbps). Also used as the maximum rate and buffer size |
+| `fps` | int | `30` | Encode frame rate (1 to 240) |
+| `gop_size` | int | `30` | GOP size (keyframe interval). Equal to `fps` gives a keyframe every second |
+| `max_b_frames` | int | `0` | Maximum number of B-frames. `0` is recommended for low-latency streaming |
+| `preset` | string | `"fast"` | Encoder preset (speed vs. quality), passed to the codec when non-empty |
+| `tune` | string | `"zerolatency"` | Codec tune option. **Not applied to hardware codecs** (`nvenc`, `amf`, `qsv`) |
+| `threads` | int | `0` | Encoder thread count. `0` means automatic |
 
-### コーデック選択の優先順位
+### Codec selection order
 
 ```text
-codec → avcodec_open2 成功？ → 使用
-                     ↓ 失敗
-fallback_codec → avcodec_open2 成功？ → 使用
-                              ↓ 失敗
-ENCODER_INIT_FAILED エラー → FATAL 状態
+codec → avcodec_open2 succeeds? → use it
+                       ↓ fails
+fallback_codec → avcodec_open2 succeeds? → use it
+                                ↓ fails
+ENCODER_INIT_FAILED error → FATAL state
 ```
 
-### NVENC 使用時の注意
+(During the initial connection, an encoder failure returns to `PROBING` first; `FATAL` is reached from `CONNECTING_OUTPUT` when all codecs fail.)
 
-NVENC では `tune` オプションがサポートされていないため自動的にスキップされます。代わりに以下が設定されます：
+### Notes for hardware codecs
 
-- `rc=cbr`（固定ビットレート）
-- `delay=0`（低遅延）
+For hardware codecs (names containing `nvenc`, `amf` or `qsv`) the `tune` option is skipped automatically. Instead the following are set:
 
----
-
-## `rtsp` セクション
-
-| キー | 型 | デフォルト | 説明 |
-|-----|----|-----------|------|
-| `url` | string | **必須** | RTSP サーバーの URL。例: `rtsp://192.168.0.100:8554/live` |
-| `connect_timeout_ms` | int | `5000` | RTSP 接続タイムアウト（ミリ秒） |
-| `send_timeout_ms` | int | `5000` | パケット送信タイムアウト（ミリ秒） |
-| `max_reconnect_attempts` | int | `5` | 最大再接続試行回数。超過すると `FATAL` 状態 |
-| `reconnect_delay_ms` | int | `1000` | 初回再接続待機時間（ミリ秒） |
-| `reconnect_max_delay_ms` | int | `30000` | 再接続待機の上限（ミリ秒） |
-| `reconnect_backoff_multiplier` | float | `2.0` | 再接続待機のバックオフ乗数 |
-
-### 再接続バックオフの計算例
-
-`reconnect_delay_ms=1000`, `multiplier=2.0`, `max=30000` の場合:
-
-| 試行 | 待機時間 |
-|-----|---------|
-| 1回目 | 1000ms |
-| 2回目 | 2000ms |
-| 3回目 | 4000ms |
-| 4回目 | 8000ms |
-| 5回目 | 16000ms |
+- `rc=cbr` (constant bitrate)
+- `delay=0` (low latency)
 
 ---
 
-## `runtime` セクション
+## `rtsp` section
 
-| キー | 型 | デフォルト | 説明 |
-|-----|----|-----------|------|
-| `shutdown_grace_ms` | int | `3000` | シャットダウン時のグレースフル待機時間（ミリ秒） |
-| `emit_metrics_interval_ms` | int | `1000` | `metrics.json` の書き出し間隔（ミリ秒） |
-| `emit_health_interval_ms` | int | `1000` | `health.json` の書き出し間隔（ミリ秒） |
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `url` | string | **required** | RTSP server URL; must start with `rtsp://`. Example: `rtsp://192.168.0.100:8554/live` |
+| `connect_timeout_ms` | int | `5000` | RTSP connection timeout (ms) |
+| `send_timeout_ms` | int | `5000` | Packet send timeout (ms) |
+| `max_reconnect_attempts` | int | `5` | Maximum reconnection attempts. Exceeding it leads to `FATAL` |
+| `reconnect_delay_ms` | int | `1000` | Initial reconnect wait (ms) |
+| `reconnect_max_delay_ms` | int | `30000` | Upper bound of the reconnect wait (ms) |
+| `reconnect_backoff_multiplier` | float | `2.0` | Back-off multiplier for the reconnect wait |
 
----
+### Reconnect back-off example
 
-## `placeholder` セクション
+With `reconnect_delay_ms=1000`, `multiplier=2.0` and `max=30000`:
 
-Spout 映像/デバイスが見つからない間（起動時の未接続、または配信中のソース消失）に、その旨を示すプレースホルダ（NO SIGNAL）映像を RTSP に配信し続けるための設定です。
-
-| キー | 型 | デフォルト | 説明 |
-|-----|----|-----------|------|
-| `enabled` | bool | `false` | プレースホルダ配信を有効化する。`false`（既定）の場合は既存挙動のまま、ソース未接続中は配信を開始しない |
-| `width` | int | `1280` | 直近に接続したソースの解像度が不明な場合に使用するプレースホルダ映像の幅（px）。正の整数であること |
-| `height` | int | `720` | 直近に接続したソースの解像度が不明な場合に使用するプレースホルダ映像の高さ（px）。正の整数であること |
-| `message` | string | `"NO SIGNAL"` | プレースホルダ映像の中央に表示するメッセージ |
-| `background_hex` | string | `"#000000"` | プレースホルダ映像の背景色。`#RRGGBB` 形式 |
-| `text_hex` | string | `"#FFFFFF"` | メッセージ・センダー名の文字色。`#RRGGBB` 形式 |
-| `show_sender_name` | bool | `true` | メッセージの下に、待機中の Spout センダー名を併記する |
-
-### 動作概要
-
-- `enabled: true` の場合、ソースが見つからない間は新設の `PLACEHOLDER` 状態に遷移し、プレースホルダ映像を `encoder.fps` で配信し続けます（RTSP ストリーム自体は維持されます）。
-- 解像度は、直近に実ソースへ接続した際の解像度が分かっていればそれを優先し、不明な場合は `width`/`height` を使用します（解像度切替による RTSP 再構成を最小化するため）。
-- 実ソースが出現すると自動的に通常の配信（`CONNECTING_OUTPUT` 以降）へ復帰します。
+| Attempt | Wait |
+|---------|------|
+| 1st | 1000 ms |
+| 2nd | 2000 ms |
+| 3rd | 4000 ms |
+| 4th | 8000 ms |
+| 5th | 16000 ms |
 
 ---
 
-## 設定のバリデーション
+## `runtime` section
 
-起動時に以下がチェックされます：
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `shutdown_grace_ms` | int | `3000` | Grace period on shutdown (ms) |
+| `emit_metrics_interval_ms` | int | `1000` | Interval for writing `metrics.json` (ms) |
+| `emit_health_interval_ms` | int | `1000` | Interval for writing `health.json` (ms) |
 
-- `spout.sender_name` が空でないこと
-- `rtsp.url` が空でないこと
+---
+
+## `placeholder` section
+
+Settings for continuing to publish a placeholder ("NO SIGNAL") video to RTSP while no Spout source is available (not connected at startup, or the source disappeared while streaming).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | bool | `false` | Enable placeholder publishing. With `false` (default), nothing is published while the source is unavailable |
+| `width` | int | `1280` | Placeholder width (px) used when the resolution of the last connected source is unknown. Must be a positive integer |
+| `height` | int | `720` | Placeholder height (px) used when the resolution of the last connected source is unknown. Must be a positive integer |
+| `message` | string | `"NO SIGNAL"` | Message shown in the centre of the placeholder video |
+| `background_hex` | string | `"#000000"` | Background colour in `#RRGGBB` form |
+| `text_hex` | string | `"#FFFFFF"` | Text colour for the message and sender name, in `#RRGGBB` form |
+| `show_sender_name` | bool | `true` | Show the awaited Spout sender name below the message |
+
+### Behavior
+
+- With `enabled: true`, the state moves to `PLACEHOLDER` while the source is missing and the placeholder video is published at `encoder.fps` (the RTSP stream itself is kept alive).
+- The resolution of the last real source is preferred when known; otherwise `width`/`height` are used (this minimizes RTSP reconfiguration on resolution changes).
+- When a real source appears, publishing returns automatically to the normal flow (`CONNECTING_OUTPUT` onwards).
+
+---
+
+## Validation
+
+The following are checked at startup:
+
+- `spout.sender_name` is not empty
+- `rtsp.url` starts with `rtsp://`
+- `encoder.fps` is between 1 and 240
 - `encoder.bitrate_kbps` > 0
-- `encoder.fps` > 0
 - `spout.poll_interval_ms` > 0
 - `spout.frame_timeout_ms` > 0
 - `rtsp.connect_timeout_ms` > 0
@@ -213,10 +215,9 @@ Spout 映像/デバイスが見つからない間（起動時の未接続、ま�
 - `rtsp.reconnect_backoff_multiplier` ≥ 1.0
 - `placeholder.width` > 0
 - `placeholder.height` > 0
-- `placeholder.background_hex` が `#RRGGBB` 形式であること
-- `placeholder.text_hex` が `#RRGGBB` 形式であること
+- `placeholder.background_hex` is in `#RRGGBB` form
+- `placeholder.text_hex` is in `#RRGGBB` form
 
-バリデーションエラーは `CONFIG_VALIDATION_ERROR` コードで標準エラーへ出力されます。
+A failure is printed to standard error as `[ERROR] <message>` (for example `[ERROR] spout.sender_name must not be empty`) and the process exits with code 1.
 
-> **Note**: `spout.stalled_recovery_max_attempts` は値の範囲チェックを行いません。
-> `0` 以下は「ウォッチドッグ無効化」という仕様上正当な値であるため、意図的にバリデーション対象外としています。
+> **Note**: `spout.stalled_recovery_max_attempts` is intentionally not range-checked, because `0` or less is a valid value meaning "watchdog disabled".
