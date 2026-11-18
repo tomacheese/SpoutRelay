@@ -406,7 +406,7 @@ bool EncoderController::encode(const FrameBuffer& frame,
 
             if (frame.gpu_texture) {
                 // GPU texture available: zero-copy transfer via CopySubresourceRegion
-                auto* src_tex = static_cast<ID3D11Texture2D*>(frame.gpu_texture);
+                auto* src_tex = static_cast<ID3D11Texture2D*>(frame.gpu_texture.get());
                 impl_->d3d_ctx->CopySubresourceRegion(
                     pool_tex, pool_index, 0, 0, 0,
                     src_tex, 0, nullptr);

@@ -422,11 +422,10 @@ void Supervisor::handle_connecting_output() {
         // the other path may have consumed spoutDX's update flag and receive_latest_frame()
         // would fail forever (STREAMING -> STALLED loop).
         //
-        // disconnect() frees spoutDX's internal texture, so a GPU-path pointer held in
-        // initial_frame_buf_ would dangle (use-after-free); discard it after disconnect.
+        // The initial frame must match the newly selected CPU/GPU capture mode.
         std::string reset_err;
         spout_monitor_->disconnect();
-        initial_frame_buf_.gpu_texture = nullptr;
+        initial_frame_buf_.gpu_texture.reset();
         if (!spout_monitor_->connect(config_.spout.sender_name, reset_err)) {
             log_->log_error("SPOUT_RECONNECT_FAILED", reset_err);
             teardown_rtsp();
@@ -986,11 +985,8 @@ void Supervisor::teardown_encoder() {
         encoder_->reset();
         encoder_.reset();
     }
-    // If SpoutMonitor disconnects while a GPU texture pointer is held, it becomes
-    // a use-after-free, so always switch back to the CPU path when tearing down the encoder.
     if (spout_monitor_) spout_monitor_->set_gpu_mode(false);
-    // Also clear initial_frame_buf_ if it holds a GPU texture pointer
-    initial_frame_buf_.gpu_texture = nullptr;
+    initial_frame_buf_.gpu_texture.reset();
 }
 
 void Supervisor::teardown_rtsp() {

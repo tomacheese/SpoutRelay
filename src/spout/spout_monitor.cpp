@@ -2,6 +2,7 @@
 #include <d3d11.h>
 #include <mutex>
 #include "spout/spout_monitor.hpp"
+#include "spout/gpu_texture_snapshot.hpp"
 #include "common/time_utils.hpp"
 #include "SpoutDX.h"
 
@@ -83,6 +84,8 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
                                         FrameMeta& meta,
                                         bool& is_new) {
     std::lock_guard<std::mutex> lock(impl_->mutex_);
+    is_new = false;
+    buf.gpu_texture.reset();
     if (!impl_->connected) return false;
 
     unsigned int w = impl_->current_info.width;
@@ -112,12 +115,6 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
                 return false;
         }
 
-        // GPU zero-copy path:
-        //   ReceiveTexture() (no arguments) updates SpoutDX's internal texture
-        //   (m_pTexture); GetSenderTexture() returns its pointer, which is stored in
-        //   the FrameBuffer. No readback to CPU memory occurs.
-        //   Note: ReceiveTexture(ID3D11Texture2D**) takes a caller-allocated texture and
-        //   returns false if *ppTexture is null, so it is not used.
         ok = impl_->receiver.ReceiveTexture();
 
         // Do not update impl_->connected here.
@@ -154,15 +151,17 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
             }
         }
 
-        // GetSenderTexture() returns a pointer to SpoutDX's internal texture,
-        // valid until the next ReceiveTexture() call.
-        // The format depends on the sender: mostly BGRA (87), but Unity/VRChat etc. use RGBA (28).
-        // EncoderController::init() sizes the GPU pool from get_sender_dxgi_format(),
-        // so the value set here follows the sender.
-        ID3D11Texture2D* tex = impl_->receiver.GetSenderTexture();
+        if (is_new) {
+            buf.gpu_texture = snapshot_gpu_texture(
+                impl_->receiver.GetDX11Device(), impl_->receiver.GetDX11Context(),
+                impl_->receiver.GetSenderTexture());
+            if (!buf.gpu_texture) {
+                is_new = false;
+                return false;
+            }
+        }
 
-        buf.data.clear();             // no CPU buffer needed on the GPU path
-        buf.gpu_texture = tex;        // used by EncoderController for CopySubresourceRegion
+        buf.data.clear();
         buf.width  = w;
         buf.height = h;
         // Mirrors the encoder's format selection logic (encoder_controller.cpp):
@@ -206,7 +205,6 @@ bool SpoutMonitor::receive_latest_frame(FrameBuffer& buf,
             is_new = impl_->receiver.IsFrameNew();
         }
 
-        buf.gpu_texture = nullptr;  // no GPU texture on the CPU path
         buf.width  = w;
         buf.height = h;
         buf.format = PixelFormat::RGBA;

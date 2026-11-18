@@ -183,6 +183,7 @@ extern int run_backoff_tests();
 extern int run_placeholder_renderer_tests();
 extern int run_log_sink_tests();
 extern int run_frame_pump_tests();
+extern int run_gpu_texture_snapshot_tests();
 extern int run_supervisor_logic_tests();
 
 void test_invalid_rtsp_url_prefix_fails() {
@@ -497,6 +498,7 @@ int main() {
     run_placeholder_renderer_tests();
     run_log_sink_tests();
     run_frame_pump_tests();
+    run_gpu_texture_snapshot_tests();
     run_supervisor_logic_tests();
 
     printf("\nAll tests passed.\n");

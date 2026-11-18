@@ -24,8 +24,8 @@ public:
 
     /// @brief Enables/disables GPU texture mode.
     ///        When enabled, receive_latest_frame() calls ReceiveTexture() instead of
-    ///        ReceiveImage() and sets the internal texture pointer in buf.gpu_texture
-    ///        (buf.data stays empty).
+    ///        ReceiveImage() and stores an owned texture snapshot in buf.gpu_texture
+    ///        for each new frame (buf.data stays empty).
     ///        When disabled, the legacy CPU copy path is used.
     virtual void set_gpu_mode(bool enabled) = 0;
 

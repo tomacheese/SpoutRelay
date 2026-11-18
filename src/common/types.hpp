@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <memory>
 
 enum class PublisherState {
     INIT,
@@ -50,13 +51,8 @@ struct FrameBuffer {
     uint32_t height = 0;
     PixelFormat format = PixelFormat::BGRA;
 
-    /// @brief GPU zero-copy path only. Borrowed pointer to SpoutDX's internal texture
-    ///        (actually an ID3D11Texture2D*).
-    ///        When non-null, EncoderController skips the CPU memory copy and transfers
-    ///        directly into the HW frame pool via CopySubresourceRegion.
-    ///        Ownership stays with SpoutMonitor.
-    ///        Remains nullptr when the GPU path is disabled.
-    void* gpu_texture = nullptr;
+    /// Owned ID3D11Texture2D snapshot; copies of a frame share its immutable pixels.
+    std::shared_ptr<void> gpu_texture;
 };
 
 struct FrameMeta {

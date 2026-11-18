@@ -9,6 +9,7 @@ add_executable(publisher_tests
     unit/test_placeholder_renderer.cpp
     unit/test_log_sink.cpp
     unit/test_frame_pump.cpp
+    unit/test_gpu_texture_snapshot.cpp
     unit/test_supervisor_logic.cpp
 )
 

@@ -15,7 +15,7 @@ SpoutRelay is tested in four categories. After any implementation or change, run
 
 ### Overview
 
-The test files under `tests/unit/` are built into the `publisher_tests` executable, linked against `publisher_lib`. They cover pure logic, configuration and state transitions without depending on a GPU or the Spout SDK itself. They also run in CI (GitHub Actions).
+The test files under `tests/unit/` are built into the `publisher_tests` executable, linked against `publisher_lib`. They cover pure logic, configuration, state transitions and GPU texture snapshots without requiring GPU hardware or a live Spout sender. Texture snapshot tests use the D3D11 WARP software device. They also run in CI (GitHub Actions).
 
 A small custom test framework (`tests/unit/test_utils.hpp`) is used; assertions are made with the `VERIFY` / `VERIFY_MSG` macros. On failure the process prints `[FAIL] ...` to standard error and exits immediately with `std::exit(1)`.
 
@@ -31,6 +31,7 @@ A small custom test framework (`tests/unit/test_utils.hpp`) is used; assertions 
 | `tests/unit/test_placeholder_renderer.cpp` | Generation of the NO SIGNAL placeholder frame |
 | `tests/unit/test_log_sink.cpp` | `LogSink` JSON Lines format, escaping and error handling |
 | `tests/unit/test_frame_pump.cpp` | `FramePump` queue, behaviour on overflow, and stopping |
+| `tests/unit/test_gpu_texture_snapshot.cpp` | BGRA/RGBA snapshot independence, source overwrite/release, resolution changes, and shared frame ownership using D3D11 WARP |
 | `tests/unit/test_supervisor_logic.cpp` | Pure logic extracted from `Supervisor` (`supervisor_logic.hpp`): seamless handoff decision, resolution-change detection |
 
 ### How to run
@@ -191,6 +192,7 @@ The following need things such as RTSP server authentication settings or special
 - Reconnection when the codec accepted by the RTSP server changes (for example after a server restart)
 - Spout sources with extreme resolutions (very small or large, for example 64x64 or above 3840x2160)
 - **First-connection check in GPU mode (`h264_nvenc`)**: on a real GPU machine, start `spout-relay.exe` against an already running Spout sender and confirm that `SPOUT_RECEIVE_FAILED` is not recorded in `logs/*.jsonl` and the state goes directly `CONNECTING_OUTPUT → STREAMING` (this verifies the fix for the black frames caused by the first-connection timing of the argument-less `ReceiveTexture()`)
+- **GPU snapshot lifetime and frame order**: with `h264_nvenc`, send rapidly changing numbered or alternating-color frames while capture runs faster than encoding. Confirm that queued frames retain their original contents and the static freeze frame stays unchanged. Repeatedly stop/restart the sender and change its resolution while frames are queued, including during an RTSP reconnect, and check for crashes, tearing, stale dimensions and `ENCODER_ENCODE_FAILED` events. With the D3D11 debug layer enabled, check for invalid resource access or copy errors.
 
 Prepare the matching config files under `e2e-test/config/`, start `spout-relay.exe` manually, and check `state/health.json`, `state/metrics.json` and `logs/*.jsonl`.
 

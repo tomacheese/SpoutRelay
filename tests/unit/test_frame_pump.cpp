@@ -39,6 +39,37 @@ private:
     uint64_t sequence_ = 0;
 };
 
+class SnapshotSpoutMonitor : public MockSpoutMonitor {
+public:
+    bool receive_latest_frame(FrameBuffer& buf, FrameMeta& meta, bool& is_new) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (snapshots.size() == 8) {
+            is_new = false;
+            completed_ = true;
+            cv_.notify_one();
+            return true;
+        }
+        auto pixels = std::make_shared<uint64_t>(snapshots.size());
+        meta.sequence = *pixels;
+        buf.gpu_texture = pixels;
+        snapshots.emplace_back(pixels);
+        is_new = true;
+        return true;
+    }
+
+    bool wait_until_queued() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return cv_.wait_for(lock, std::chrono::seconds(2), [this] { return completed_; });
+    }
+
+    std::vector<std::weak_ptr<void>> snapshots;
+
+private:
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool completed_ = false;
+};
+
 int run_frame_pump_tests() {
     printf("=== Frame Pump Tests ===\n");
 
@@ -154,6 +185,30 @@ int run_frame_pump_tests() {
         bool ok = pump.try_pop(buf, meta);
         VERIFY_MSG(!ok, "queue should be drained after stop()");
         printf("[PASS] stop() drains the queue and halts capture\n");
+    }
+
+    {
+        auto mock = std::make_shared<SnapshotSpoutMonitor>();
+        FramePump pump;
+        pump.start(mock, 1);
+        VERIFY_MSG(mock->wait_until_queued(), "snapshot frames should reach the queue");
+        for (size_t i = 0; i < 4; ++i) VERIFY(mock->snapshots[i].expired());
+        for (size_t i = 4; i < 8; ++i) VERIFY(!mock->snapshots[i].expired());
+
+        FrameBuffer frame;
+        FrameMeta meta;
+        VERIFY(pump.try_pop(frame, meta));
+        VERIFY(meta.sequence == 4);
+        VERIFY(*static_cast<uint64_t*>(frame.gpu_texture.get()) == 4);
+        FrameBuffer freeze = frame;
+        frame = {};
+        pump.stop();
+        VERIFY(!mock->snapshots[4].expired());
+        for (size_t i = 5; i < 8; ++i) VERIFY(mock->snapshots[i].expired());
+        VERIFY(*static_cast<uint64_t*>(freeze.gpu_texture.get()) == 4);
+        freeze = {};
+        VERIFY(mock->snapshots[4].expired());
+        printf("[PASS] queue overflow and stop release snapshots while freeze copies retain ownership\n");
     }
 
     return 0;

@@ -76,7 +76,7 @@
 [RTSP RTP/TCP → MediaMTX]
 ```
 
-With a hardware codec and a D3D11 device, the GPU zero-copy path copies the Spout texture straight into the encoder's hardware frame pool instead (logged as `gpu_zero_copy_enabled`). If GPU initialisation fails, the encoder falls back to the CPU path above.
+With a hardware codec and a D3D11 device, the GPU path (logged as `gpu_zero_copy_enabled`) copies each new Spout frame into an owned texture snapshot inside `receive_latest_frame()`, while the receiver mutex is held. The copy uses the receiver's immediate context, ordering it before the next receive can overwrite the source. Only the snapshot is queued; the encode thread copies it into the encoder's hardware frame pool without CPU readback. Frame copies share ownership of the immutable snapshot, so queued and freeze-cached frames remain valid across sender disconnects and resolution changes. Dropping or draining the queue releases its references; the texture is released after the last frame reference is destroyed. If GPU initialisation fails, the encoder falls back to the CPU path above.
 
 ## Thread model
 
