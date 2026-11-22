@@ -165,6 +165,24 @@ int run_log_sink_tests() {
     }
 
     {
+        // log_publish_started masks credentials in the URL
+        fs::remove_all(log_dir);
+        LogSink sink;
+        std::string err;
+        VERIFY(sink.init(log_dir, "test-instance", err));
+
+        sink.log_publish_started("rtsp://user:s3cret@host/live", 1280, 720, 30);
+        sink.flush();
+
+        std::string content = read_file(log_dir + "/test-instance.jsonl");
+        json j = parse_last_line(content);
+        VERIFY(j["event"] == "publish_started");
+        VERIFY(j["url"]   == "rtsp://***@host/live");
+        VERIFY(content.find("s3cret") == std::string::npos);
+        printf("[PASS] log_publish_started masks credentials in url\n");
+    }
+
+    {
         // If a regular file with the same name as the log directory already exists,
         // directory creation fails and init() returns an error
         const std::string blocked = "test_log_sink_blocked_file";

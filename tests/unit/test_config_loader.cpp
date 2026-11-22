@@ -185,6 +185,7 @@ extern int run_log_sink_tests();
 extern int run_frame_pump_tests();
 extern int run_gpu_texture_snapshot_tests();
 extern int run_supervisor_logic_tests();
+extern int run_url_redact_tests();
 
 void test_invalid_rtsp_url_prefix_fails() {
     const std::string json = R"({
@@ -500,6 +501,7 @@ int main() {
     run_frame_pump_tests();
     run_gpu_texture_snapshot_tests();
     run_supervisor_logic_tests();
+    run_url_redact_tests();
 
     printf("\nAll tests passed.\n");
     return 0;

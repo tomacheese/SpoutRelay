@@ -1,6 +1,7 @@
 #include "metrics/metrics_store.hpp"
 #include "common/atomic_file.hpp"
 #include "common/time_utils.hpp"
+#include "common/url_redact.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <filesystem>
@@ -37,7 +38,7 @@ void MetricsStore::set_current_fps(double fps) {
 
 void MetricsStore::set_rtsp_url(const std::string& url) {
     std::lock_guard<std::mutex> lk(mutex_);
-    rtsp_url_ = url;
+    rtsp_url_ = redact_url_userinfo(url);
 }
 
 void MetricsStore::set_encoder_codec(const std::string& codec) {

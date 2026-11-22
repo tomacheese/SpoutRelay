@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <nlohmann/json.hpp>
 #include "metrics/metrics_store.hpp"
 #include "test_utils.hpp"
 
@@ -76,6 +77,25 @@ int run_metrics_tests() {
 
         std::remove(path.c_str());
         printf("[PASS] save_metrics writes correct JSON\n");
+    }
+
+    {
+        // set_rtsp_url masks credentials in the saved metrics
+        MetricsStore ms;
+        ms.mark_session_start();
+        ms.set_rtsp_url("rtsp://user:s3cret@host/live");
+
+        std::string path = "test_metrics_redact_tmp.json";
+        VERIFY_MSG(ms.save_metrics(path), "save_metrics should succeed");
+
+        std::ifstream f(path);
+        std::string content((std::istreambuf_iterator<char>(f)),
+                             std::istreambuf_iterator<char>());
+        VERIFY(nlohmann::json::parse(content)["rtsp_url"] == "rtsp://***@host/live");
+        VERIFY(content.find("s3cret") == std::string::npos);
+
+        std::remove(path.c_str());
+        printf("[PASS] set_rtsp_url masks credentials in metrics.json\n");
     }
 
     {

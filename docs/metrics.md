@@ -116,7 +116,7 @@ Contains detailed counters about publishing performance.
 | `sender_fps` | float | Frame rate reported by the sender |
 | `bitrate_kbps` | float | Measured bitrate (kbps) |
 | `current_fps` | float | Effective encoder frame rate |
-| `rtsp_url` | string | Configured RTSP URL |
+| `rtsp_url` | string | Configured RTSP URL. Any userinfo is masked: `rtsp://user:pass@host/live` is written as `rtsp://***@host/live` |
 | `encoder_codec` | string | Codec in use (`h264_nvenc`, etc.) |
 | `uptime_ms` | int | Milliseconds since the session started |
 | `frames_received` | int | Total frames received from Spout |
@@ -172,6 +172,8 @@ The file rotates at 10 MB, keeping 5 files.
 ```json
 {"ts":"2026-04-09T22:05:44.473Z","event":"publish_started","url":"rtsp://192.168.0.100:8554/live","width":"3840","height":"2160","fps":"30"}
 ```
+
+`url` has its userinfo masked the same way as `rtsp_url` in `metrics.json`.
 
 #### error
 
