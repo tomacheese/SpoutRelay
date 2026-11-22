@@ -11,6 +11,7 @@ add_executable(publisher_tests
     unit/test_frame_pump.cpp
     unit/test_gpu_texture_snapshot.cpp
     unit/test_supervisor_logic.cpp
+    unit/test_url_redact.cpp
 )
 
 target_link_libraries(publisher_tests PRIVATE publisher_lib)

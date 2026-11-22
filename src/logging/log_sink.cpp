@@ -1,5 +1,6 @@
 #include "logging/log_sink.hpp"
 #include "common/time_utils.hpp"
+#include "common/url_redact.hpp"
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <filesystem>
@@ -96,7 +97,7 @@ void LogSink::log_error(const std::string& code,
 void LogSink::log_publish_started(const std::string& url,
                                   int width, int height, int fps) {
     log_event(spdlog::level::info, "publish_started",
-              {{"url", url},
+              {{"url", redact_url_userinfo(url)},
                {"width",  std::to_string(width)},
                {"height", std::to_string(height)},
                {"fps",    std::to_string(fps)}});
